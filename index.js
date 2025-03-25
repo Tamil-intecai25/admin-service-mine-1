@@ -16,7 +16,7 @@ const jwt = require("jsonwebtoken");
 
 const Responder = require('./src/Helpers/Responder');
 
-var accessLogStream = fs.createWriteStream(path.join(__dirname, 'access.log'), { flags: 'a' });
+// var accessLogStream = fs.createWriteStream(path.join(__dirname, 'access.log'), { flags: 'a' });
 
 app.use(morgan('combined', { stream: accessLogStream }));
 app.use(helmet());
