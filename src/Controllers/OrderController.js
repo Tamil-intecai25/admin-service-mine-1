@@ -180,7 +180,7 @@ function Controller() {
   this.acceptOrderForSeller = async function (req, res) {
     try {
       const { orderId, sellerId, preparingTime } = req.query;
-      const { io, deliveryPartners } = req;
+      const { io, deliveryPartners, users } = req;
       if (!orderId || !sellerId) {
         return Responder.sendFailure(res, "Missing required fields", 400);
       }
@@ -247,6 +247,12 @@ function Controller() {
       let overallETA = totalDuration + parseInt(preparingTime);
       let ETA_in_minutes = Utils.convertSecondsToMinutes(overallETA);
 
+      order.seller.preparingTime = {
+        text: Utils.convertSecondsToMinutes(preparingTime),
+        value: preparingTime,
+      };
+      order.seller.timestamps.acceptedAt = Date.now();
+      order.seller.timestamps.preparingStartAt = Date.now();
       order.deliveryPartner = {
         partnerId: nearestPartner.partner.partnerId,
         name: nearestPartner.partner.name,
@@ -279,12 +285,24 @@ function Controller() {
       await order.save();
 
       // Notify the delivery partner via Socket.IO
-      console.log("deliveryPartners Map:", [...deliveryPartners.entries()]);
-      console.log("Looking up partnerId:", nearestPartner.partner.partnerId);
+
       const partnerSocketId = deliveryPartners.get(
         nearestPartner.partner.partnerId
       );
-      console.log("partnerSocketId:", partnerSocketId);
+
+      const userSocketId = users.get(order.user.userId);
+      if (userSocketId) {
+        io.to(userSocketId).emit("orderPlaced", {
+          orderId: order.orderId,
+          sellerId: order.seller.sellerId,
+          deliveryDetails: order.deliveryPartner,
+          mapsData: order.mapsData,
+          message: "Order Placed successfully",
+        });
+        console.log(`Notified user ${order.user.userId}`);
+      } else {
+        console.log(`user ${order.user.userId} not connected`);
+      }
 
       if (partnerSocketId) {
         io.to(partnerSocketId).emit("orderAssigned", {
@@ -322,6 +340,55 @@ function Controller() {
       if (!orderId || !partnerId) {
         return Responder.sendFailure(res, "Missing required fields", 400);
       }
+
+      // Fetch the order
+      let order = await OrderModel.findOne({
+        orderId,
+        "deliveryPartner.partnerId": partnerId,
+      });
+
+      if (!order) {
+        return Responder.sendFailure(res, "Order not found", 404);
+      }
+      console.log(111);
+      // Update the accepted timestamp if not already set
+      if (order) {
+        console.log("--------------->");
+        order.deliveryPartner.timestamps.acceptedAt = new Date();
+        await order.save();
+      }
+      console.log(222);
+      // Prepare route data for delivery partner to seller
+      const routeToSeller = {
+        distance: order.mapsData.deliveryPartnerToSeller.distance,
+        duration: order.mapsData.deliveryPartnerToSeller.duration,
+        from: order.deliveryPartner.tracking.currentLocation,
+        to: order.seller.location,
+      };
+      const routeToUser = {
+        distance: order.mapsData.sellerToUser.distance,
+        duration: order.mapsData.sellerToUser.duration,
+        from: order.seller.location,
+        to: order.user.location,
+      };
+      return Responder.sendSuccess(res, "Order accepted", 200, {
+        order,
+        route: { routeToSeller, routeToUser },
+      });
+    } catch (error) {
+      console.error("Error accepting order:", error);
+      return Responder.sendFailure(res, "Something went wrong", 500);
+    }
+  };
+  this.reachedPickupLocationrForPartner = async function (req, res) {
+    try {
+      const { orderId, partnerId } = req.query;
+
+      if (!orderId || !partnerId) {
+        return Responder.sendFailure(res, "Missing required fields", 400);
+      }
+
+      // Fetch the order
       let order = await OrderModel.findOne({
         orderId,
         "deliveryPartner.partnerId": partnerId,
@@ -331,57 +398,75 @@ function Controller() {
         return Responder.sendFailure(res, "Order not found", 404);
       }
 
-      // Calculate total duration and distance
-      let totalDuration = 0;
-      let totalDistance = 0;
+      // Check if order was accepted
+      if (order) {
+        return Responder.sendFailure(res, "Order not yet accepted", 400);
+      }
 
-      routeDetails.forEach((leg) => {
-        totalDuration += leg.duration.value;
-        totalDistance += leg.distance.value;
-      });
-
-      let overallETA = totalDuration + parseInt(preparingTime);
-      let ETA_in_minutes = Utils.convertSecondsToMinutes(overallETA);
-
-      order.deliveryPartner = {
-        partnerId: nearestPartner.partner.partnerId,
-        name: nearestPartner.partner.name,
-        contact: nearestPartner.partner.phone,
-        tracking: {
-          currentLocation: {
-            lat: nearestPartner.partner.location.lat,
-            long: nearestPartner.partner.location.long,
-          },
-          estimatedDeliveryTime: {
-            text: ETA_in_minutes,
-            value: overallETA.toString(),
-            date: new Date(Date.now() + overallETA * 1000).toISOString(),
-          },
-          totalDistance: `${(totalDistance / 1000).toFixed(2)} km`, // Convert meters to km
-        },
-      };
-
-      order.mapsData = {
-        deliveryPartnerToSeller: {
-          distance: routeDetails[0].distance,
-          duration: routeDetails[0].duration,
-        },
-        sellerToUser: {
-          distance: routeDetails[1].distance,
-          duration: routeDetails[1].duration,
-        },
-      };
-
+      // Update the pickedUpAt timestamp
+      order.deliveryPartner.timestamps.reachedPickupAt = new Date();
       await order.save();
 
-      return Responder.sendSuccess(
-        res,
-        "Order accepted, delivery partner notified",
-        200,
-        order
-      );
+      // Prepare route data for seller to user
+      const routeToUser = {
+        distance: order.mapsData.sellerToUser.distance,
+        duration: order.mapsData.sellerToUser.duration,
+        from: order.seller.location,
+        to: order.user.location,
+      };
+
+      return Responder.sendSuccess(res, "Order picked up", 200, {
+        order,
+        route: routeToUser,
+      });
     } catch (error) {
-      console.error("Error accepting order:", error);
+      console.error("Error picking up order:", error);
+      return Responder.sendFailure(res, "Something went wrong", 500);
+    }
+  };
+  // New method to handle pickup
+  this.pickupOrderForPartner = async function (req, res) {
+    try {
+      const { orderId, partnerId } = req.query;
+
+      if (!orderId || !partnerId) {
+        return Responder.sendFailure(res, "Missing required fields", 400);
+      }
+
+      // Fetch the order
+      let order = await OrderModel.findOne({
+        orderId,
+        "deliveryPartner.partnerId": partnerId,
+      });
+
+      if (!order) {
+        return Responder.sendFailure(res, "Order not found", 404);
+      }
+
+      // Check if order was accepted
+      if (order) {
+        return Responder.sendFailure(res, "Order not yet accepted", 400);
+      }
+
+      // Update the pickedUpAt timestamp
+      order.deliveryPartner.timestamps.pickedUpAt = new Date();
+      order.status = "picked_up"; // Update status to reflect pickup
+      await order.save();
+
+      // Prepare route data for seller to user
+      const routeToUser = {
+        distance: order.mapsData.sellerToUser.distance,
+        duration: order.mapsData.sellerToUser.duration,
+        from: order.seller.location,
+        to: order.user.location,
+      };
+
+      return Responder.sendSuccess(res, "Order picked up", 200, {
+        order,
+        route: routeToUser,
+      });
+    } catch (error) {
+      console.error("Error picking up order:", error);
       return Responder.sendFailure(res, "Something went wrong", 500);
     }
   };
@@ -389,6 +474,7 @@ function Controller() {
   this.getOrdersByPartnerId = async function (req, res) {
     try {
       const { partnerId } = req.query;
+      const { io, deliveryPartners } = req;
 
       if (!partnerId) {
         return Responder.sendFailure(res, "Missing required fields", 400);
@@ -399,6 +485,67 @@ function Controller() {
 
       if (!partnerId) {
         return Responder.sendFailure(res, "Order not found", 404);
+      }
+
+      let latLong = [
+        { lat: 13.021793, long: 80.206473 },
+        { lat: 13.021615, long: 80.206494 },
+        { lat: 13.021168, long: 80.206479 },
+        { lat: 13.020177, long: 80.206468 },
+        { lat: 13.019533, long: 80.20642 },
+        { lat: 13.018951, long: 80.206254 },
+        { lat: 13.017948, long: 80.205894 },
+        { lat: 13.017848, long: 80.20568 },
+        { lat: 13.018195, long: 80.205793 },
+        { lat: 13.018786, long: 80.20603 },
+        { lat: 13.019239, long: 80.206128 },
+        { lat: 13.020917, long: 80.20629 },
+        { lat: 13.021973, long: 80.206307 },
+        { lat: 13.022434, long: 80.206292 },
+      ];
+
+      const partnerSocketId = deliveryPartners.get(
+        order.deliveryPartner.partnerId
+      );
+
+      if (partnerSocketId) {
+        const sendCoordinates = async () => {
+          try {
+            for (let i = 0; i < latLong.length; i++) {
+              const coord = latLong[i];
+              // Check if socket is still connected before emitting
+              if (io.sockets.sockets.get(partnerSocketId)) {
+                io.to(partnerSocketId).emit("partnerLocationUpdate", {
+                  partnerId: order.deliveryPartner.partnerId,
+                  location: { lat: coord.lat, long: coord.long },
+                  message: "partnerLocationUpdate",
+                  sequence: i + 1, // Adding sequence number for debugging
+                  total: latLong.length, // Total number of coordinates
+                });
+                console.log(
+                  `Sent coordinate ${i + 1}/${
+                    latLong.length
+                  } to ${partnerSocketId}: ${coord.lat}, ${coord.long}`
+                );
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+              } else {
+                console.log(
+                  `Socket ${partnerSocketId} disconnected during transmission`
+                );
+                break;
+              }
+            }
+            console.log(
+              `Completed sending all coordinates to ${partnerSocketId}`
+            );
+          } catch (error) {
+            console.error(`Error sending coordinates: ${error}`);
+          }
+        };
+
+        sendCoordinates();
+      } else {
+        console.log(`User ${order.user.userId} not connected`);
       }
 
       return Responder.sendSuccess(res, "Orders get successfully", 201, order);
