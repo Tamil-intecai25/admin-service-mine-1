@@ -61,7 +61,6 @@ clientNamespace.on("connection", (socket) => {
   socket.emit("message", {
     message: "Welcome to the restaurant order server!",
   });
-  // console.log("pending orders", pendingOrders)
   if (pendingOrders.length > 0) {
     pendingOrders.forEach((order) => {
       socket.emit("NEW_ORDER", { type: "NEW_ORDER", data: order });
