@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # These are some examples of commonly ignored file patterns.
 # You should customize this list as applicable to your project.
 # Learn more about .gitignore:
@@ -48,3 +49,44 @@ Thumbs.db
 *.mov
 *.wmv
 
+=======
+# Node.js dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn.lock
+package-lock.json  # Remove this line if you want to commit lockfiles
+
+# Build output
+dist/
+build/
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Environment variables
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Editor-specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+temp/
+
+# Coverage reports (if using testing tools)
+coverage/
+>>>>>>> origin/dev
