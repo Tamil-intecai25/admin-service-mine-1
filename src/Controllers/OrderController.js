@@ -1,5 +1,7 @@
 var Utils = require("../Helpers/Utils");
+var Socket = require("../Helpers/socketIo");
 var Responder = require("../Helpers/Responder");
+let Config = require("../Configs/Config");
 const ZoneModel = require("../Models/ZoneModel");
 const AreaModel = require("../Models/AreaModel");
 const OneAppUserModel = require("../Models/OneAppUserModel");
@@ -22,7 +24,7 @@ function Controller() {
     try {
       const { userId, items, totalAmount, lat, long, paymentMethod, sellerId } =
         req.body;
-
+      const { io, sellers } = req;
       if (
         !userId ||
         !items ||
@@ -54,9 +56,15 @@ function Controller() {
       }
 
       let selectedSeller;
-
+      let user;
       // If sellerId is provided, use it directly
       // if (sellerId) {
+
+      user = await OneAppUserModel.findOne({ userId });
+      if (!user) {
+        return Responder.sendFailure(res, "user not found", 404);
+      }
+      console.log(user, "------------------>");
       selectedSeller = await SellerModel.findOne({ sellerId });
       if (!selectedSeller) {
         return Responder.sendFailure(res, "Seller not found", 404);
@@ -86,15 +94,30 @@ function Controller() {
       // Create an order
       let order = new OrderModel({
         orderId: "order_" + Utils.getNanoId(),
-        userId,
-        sellerId: selectedSeller.sellerId,
+        user: {
+          userId: user.userId,
+          name: user.name,
+          phoneNumber: user.phone,
+          location: {
+            lat: user.location.home.lat,
+            long: user.location.home.lng,
+          },
+        },
+        seller: {
+          sellerId: selectedSeller.sellerId,
+          name: selectedSeller.sellerName,
+          contact: selectedSeller.phone,
+          location: {
+            lat: selectedSeller.location.branch.lat,
+            long: selectedSeller.location.branch.long,
+          },
+        },
         items,
         totalAmount,
         status: "pending",
         paymentStatus: "pending",
         paymentMethod,
         location: { lat, long },
-        tracking: { assignedDeliveryPartner: null },
         audit: {
           createdBy: { id: userId, name: "User" }, // Ideally, replace "User" with actual user name
         },
@@ -102,11 +125,24 @@ function Controller() {
 
       await order.save();
 
-      // Send notification to seller
-      await NotificationService.sendToSeller(selectedSeller.sellerId, {
-        title: "New Order Received",
-        message: `You have received a new order. Order ID: ${order.orderId}`,
-      });
+      // Notify the delivery partner via Socket.IO
+      console.log("seller Map:", [...sellers.entries()]);
+      console.log("Looking up partnerId:", sellerId);
+      const sellerrSocketId = sellers.get(sellerId);
+      console.log("sellerrSocketId:", sellerrSocketId);
+
+      if (sellerrSocketId) {
+        io.to(sellerrSocketId).emit("orderCreated", {
+          orderId: order.orderId,
+          sellerId: order.seller.sellerId,
+          deliveryDetails: order.deliveryPartner,
+          mapsData: order.mapsData,
+          message: "New order created to you",
+        });
+        console.log(`Notified seller ${sellerId}`);
+      } else {
+        console.log(` Seller ${sellerId} not connected`);
+      }
 
       return Responder.sendSuccess(
         res,
@@ -120,29 +156,67 @@ function Controller() {
     }
   };
 
-  this.acceptOrder = async function (req, res) {
+  this.getOrdersBySellerId = async function (req, res) {
     try {
-      const { orderId, sellerId } = req.body;
+      const { sellerId } = req.query;
 
+      console.log(req);
+      if (!sellerId) {
+        return Responder.sendFailure(res, "Missing required fields", 400);
+      }
+      let order = await OrderModel.findOne({ "seller.sellerId": sellerId });
+
+      if (!sellerId) {
+        return Responder.sendFailure(res, "Order not found", 404);
+      }
+
+      return Responder.sendSuccess(res, "Orders get successfully", 201, order);
+    } catch (error) {
+      console.error("Error get orders:", error);
+      return Responder.sendFailure(res, "Something went wrong", 400);
+    }
+  };
+
+  this.acceptOrderForSeller = async function (req, res) {
+    try {
+      const { orderId, sellerId, preparingTime } = req.query;
+      const { io, deliveryPartners } = req;
       if (!orderId || !sellerId) {
         return Responder.sendFailure(res, "Missing required fields", 400);
       }
 
-      let order = await OrderModel.findOne({ orderId, sellerId });
+      let order = await OrderModel.findOne({
+        orderId,
+        "seller.sellerId": sellerId,
+      });
 
       if (!order) {
         return Responder.sendFailure(res, "Order not found", 404);
       }
 
-      order.status = "accepted";
+      order.status = "preparing";
       await order.save();
 
-      // Find the nearest delivery partner
-      let partners = await this.findZonesContainingDeliveryPartner({
-        body: { lat: order.location.lat, long: order.location.long },
+      let seller = await SellerModel.findOne(
+        { sellerId: order.seller.sellerId },
+        { location: 1 }
+      );
+      if (!seller) {
+        return Responder.sendFailure(res, "Seller not found", 404);
+      }
+
+      let partners = await Utils.findZonesContainingDeliveryPartner(res, {
+        body: {
+          lat: seller.location.branch.lat,
+          long: seller.location.branch.long,
+        },
       });
 
-      if (!partners.data || partners.data.allPartners.length === 0) {
+      if (
+        !partners ||
+        !partners.allPartners ||
+        partners.allPartners.length === 0
+      ) {
         return Responder.sendFailure(
           res,
           "No delivery partners available",
@@ -150,22 +224,187 @@ function Controller() {
         );
       }
 
-      let nearestPartner = partners.data.nearestPartner;
+      let nearestPartner = partners.nearestPartner;
 
-      // Send notification to the delivery partner
-      NotificationService.sendToDeliveryPartner(nearestPartner.partnerId, {
-        title: "New Delivery Assignment",
-        message: `You have been assigned a new delivery. Order ID: ${orderId}`,
+      let waypoints = `${seller.location.branch.lat},${seller.location.branch.long}`;
+
+      let directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${nearestPartner.partner.location.lat},${nearestPartner.partner.location.long}&destination=${order.user?.location.lat},${order.user?.location.long}&waypoints=${waypoints}&key=${Config.google.mapApi}`;
+
+      let directionsResponse = await axios.get(directionsUrl);
+
+      let routeDetails = directionsResponse.data.routes[0].legs;
+
+      console.log(routeDetails, "---------------> route details");
+
+      let totalDuration = 0;
+      let totalDistance = 0;
+
+      routeDetails.forEach((leg) => {
+        totalDuration += leg.duration.value;
+        totalDistance += leg.distance.value;
       });
+
+      let overallETA = totalDuration + parseInt(preparingTime);
+      let ETA_in_minutes = Utils.convertSecondsToMinutes(overallETA);
+
+      order.deliveryPartner = {
+        partnerId: nearestPartner.partner.partnerId,
+        name: nearestPartner.partner.name,
+        contact: nearestPartner.partner.phone,
+        tracking: {
+          currentLocation: {
+            lat: nearestPartner.partner.location.lat,
+            long: nearestPartner.partner.location.long,
+          },
+          estimatedDeliveryTime: {
+            text: ETA_in_minutes,
+            value: overallETA.toString(),
+            date: new Date(Date.now() + overallETA * 1000).toISOString(),
+          },
+          totalDistance: `${(totalDistance / 1000).toFixed(2)} km`,
+        },
+      };
+
+      order.mapsData = {
+        deliveryPartnerToSeller: {
+          distance: routeDetails[0].distance,
+          duration: routeDetails[0].duration,
+        },
+        sellerToUser: {
+          distance: routeDetails[1].distance,
+          duration: routeDetails[1].duration,
+        },
+      };
+
+      await order.save();
+
+      // Notify the delivery partner via Socket.IO
+      console.log("deliveryPartners Map:", [...deliveryPartners.entries()]);
+      console.log("Looking up partnerId:", nearestPartner.partner.partnerId);
+      const partnerSocketId = deliveryPartners.get(
+        nearestPartner.partner.partnerId
+      );
+      console.log("partnerSocketId:", partnerSocketId);
+
+      if (partnerSocketId) {
+        io.to(partnerSocketId).emit("orderAssigned", {
+          orderId: order.orderId,
+          sellerId: order.seller.sellerId,
+          deliveryDetails: order.deliveryPartner,
+          mapsData: order.mapsData,
+          message: "New order assigned to you",
+        });
+        console.log(
+          `Notified delivery partner ${nearestPartner.partner.partnerId}`
+        );
+      } else {
+        console.log(
+          `Delivery partner ${nearestPartner.partner.partnerId} not connected`
+        );
+      }
 
       return Responder.sendSuccess(
         res,
         "Order accepted, delivery partner notified",
-        200
+        200,
+        order
       );
     } catch (error) {
       console.error("Error accepting order:", error);
       return Responder.sendFailure(res, "Something went wrong", 500);
+    }
+  };
+
+  this.acceptOrderForPartner = async function (req, res) {
+    try {
+      const { orderId, partnerId } = req.query;
+
+      if (!orderId || !partnerId) {
+        return Responder.sendFailure(res, "Missing required fields", 400);
+      }
+      let order = await OrderModel.findOne({
+        orderId,
+        "deliveryPartner.partnerId": partnerId,
+      });
+
+      if (!order) {
+        return Responder.sendFailure(res, "Order not found", 404);
+      }
+
+      // Calculate total duration and distance
+      let totalDuration = 0;
+      let totalDistance = 0;
+
+      routeDetails.forEach((leg) => {
+        totalDuration += leg.duration.value;
+        totalDistance += leg.distance.value;
+      });
+
+      let overallETA = totalDuration + parseInt(preparingTime);
+      let ETA_in_minutes = Utils.convertSecondsToMinutes(overallETA);
+
+      order.deliveryPartner = {
+        partnerId: nearestPartner.partner.partnerId,
+        name: nearestPartner.partner.name,
+        contact: nearestPartner.partner.phone,
+        tracking: {
+          currentLocation: {
+            lat: nearestPartner.partner.location.lat,
+            long: nearestPartner.partner.location.long,
+          },
+          estimatedDeliveryTime: {
+            text: ETA_in_minutes,
+            value: overallETA.toString(),
+            date: new Date(Date.now() + overallETA * 1000).toISOString(),
+          },
+          totalDistance: `${(totalDistance / 1000).toFixed(2)} km`, // Convert meters to km
+        },
+      };
+
+      order.mapsData = {
+        deliveryPartnerToSeller: {
+          distance: routeDetails[0].distance,
+          duration: routeDetails[0].duration,
+        },
+        sellerToUser: {
+          distance: routeDetails[1].distance,
+          duration: routeDetails[1].duration,
+        },
+      };
+
+      await order.save();
+
+      return Responder.sendSuccess(
+        res,
+        "Order accepted, delivery partner notified",
+        200,
+        order
+      );
+    } catch (error) {
+      console.error("Error accepting order:", error);
+      return Responder.sendFailure(res, "Something went wrong", 500);
+    }
+  };
+
+  this.getOrdersByPartnerId = async function (req, res) {
+    try {
+      const { partnerId } = req.query;
+
+      if (!partnerId) {
+        return Responder.sendFailure(res, "Missing required fields", 400);
+      }
+      let order = await OrderModel.findOne({
+        "deliveryPartner.partnerId": partnerId,
+      });
+
+      if (!partnerId) {
+        return Responder.sendFailure(res, "Order not found", 404);
+      }
+
+      return Responder.sendSuccess(res, "Orders get successfully", 201, order);
+    } catch (error) {
+      console.error("Error get orders:", error);
+      return Responder.sendFailure(res, "Something went wrong", 400);
     }
   };
 
