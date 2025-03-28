@@ -1,6 +1,5 @@
 // server.js
 const dotenv = require("dotenv");
-
 dotenv.config();
 const http = require("http");
 const express = require("express");
@@ -21,9 +20,10 @@ var accessLogStream = fs.createWriteStream(path.join(__dirname, "access.log"), {
 });
 
 app.use(morgan("combined", { stream: accessLogStream }));
+
 const server = http.createServer(app);
 
-const { io, sellers, deliveryPartners } = initializeSocket(
+const { io, sellers, users, deliveryPartners } = initializeSocket(
   7008,
   "http://localhost:7007"
 );
@@ -34,6 +34,7 @@ app.use((req, res, next) => {
   req.io = io;
   req.deliveryPartners = deliveryPartners;
   req.sellers = sellers;
+  req.users = users;
   next();
 });
 app.use(helmet());

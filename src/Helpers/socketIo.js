@@ -57,10 +57,34 @@ const initializeSocket = (port, apiBaseUrl) => {
   });
 
   const sellers = new Map();
+  const users = new Map();
   const deliveryPartners = new Map(); // Add Map for delivery partners
 
   io.on("connection", (socket) => {
     console.log("A user connected:", socket.id);
+
+    // ***************User Register**************
+    socket.on("registerUser", async (userId) => {
+      try {
+        users.set(userId, socket.id);
+        console.log(`User ${userId} connected with socket ID ${socket.id}`);
+        // await axios.post(`${apiBaseUrl}/api/seller/register`, {
+        //   sellerId,
+        //   socketId: socket.id,
+        //   status: "online",
+        // });
+        socket.emit("registrationUserStatus", {
+          success: true,
+          message: "User registered successfully",
+        });
+      } catch (error) {
+        console.error("Error registering User:", error);
+        socket.emit("registrationUserStatus", {
+          success: false,
+          message: "Failed to register seller",
+        });
+      }
+    });
 
     // Register seller
     socket.on("registerSeller", async (sellerId) => {
@@ -137,7 +161,7 @@ const initializeSocket = (port, apiBaseUrl) => {
     });
   });
 
-  return { io, sellers, deliveryPartners }; // Return deliveryPartners too
+  return { io, sellers, users, deliveryPartners }; // Return deliveryPartners too
 };
 
 module.exports = { initializeSocket };

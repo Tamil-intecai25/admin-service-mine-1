@@ -24,4 +24,13 @@ app.post("/seller/accept-order", function (req, res) {
 app.get("/partner/get-orders", function (req, res) {
   OrderController.getOrdersByPartnerId(req, res);
 });
+
+app.post("/partner/accept-order", function (req, res) {
+  OrderController.acceptOrderForPartner(req, res);
+});
+
+app.post("/partner/pickup-order", function (req, res) {
+  OrderController.acceptOrderForPartner(req, res);
+});
+
 module.exports = app;
