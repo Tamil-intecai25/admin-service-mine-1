@@ -3,11 +3,11 @@ let mongoose = require('mongoose').Mongoose;
 
 
 let admin = new mongoose();
-let merchant = new mongoose();
-let properties = new mongoose();
-let transaction = new mongoose();
+// let merchant = new mongoose();
+// let properties = new mongoose();
+// let transaction = new mongoose();
 
-let {merchant : merchantDbUrl, admin : adminDbUrl, properties : propertiesDbUrl, transaction : transactionsDbUrl } = Config.dbUrl;
+let { admin : adminDbUrl } = Config.dbUrl;
 
 
 function DBConnection() {
@@ -18,17 +18,17 @@ function DBConnection() {
             then(() => console.log('admin DB Connected')).
             catch(err => console.error('admin Caught', err.message));
         admin.set("debug", true)
-        merchant.connect(merchantDbUrl, { useNewUrlParser: true, useUnifiedTopology: true }).
-            then(() => console.log('merchant DB Connected')).
-            catch(err => console.error('merchant Caught', err.message));
-        merchant.set("debug", true)
-        properties.connect(propertiesDbUrl, { useNewUrlParser: true, useUnifiedTopology: true }).
-            then(() => console.log('properties DB Connected')).
-            catch(err => console.error('properties Caught', err.message));
-        properties.set("debug", true)
-        transaction.connect(transactionsDbUrl, { useNewUrlParser: true, useUnifiedTopology: true }).
-            then(() => console.log('transaction DB Connected')).
-            catch(err => console.error('transaction Caught', err.message));
+        // merchant.connect(merchantDbUrl, { useNewUrlParser: true, useUnifiedTopology: true }).
+        //     then(() => console.log('merchant DB Connected')).
+        //     catch(err => console.error('merchant Caught', err.message));
+        // merchant.set("debug", true)
+        // properties.connect(propertiesDbUrl, { useNewUrlParser: true, useUnifiedTopology: true }).
+        //     then(() => console.log('properties DB Connected')).
+        //     catch(err => console.error('properties Caught', err.message));
+        // properties.set("debug", true)
+        // transaction.connect(transactionsDbUrl, { useNewUrlParser: true, useUnifiedTopology: true }).
+        //     then(() => console.log('transaction DB Connected')).
+        //     catch(err => console.error('transaction Caught', err.message));
     };
 
 
@@ -36,17 +36,17 @@ function DBConnection() {
         return admin;
     };
 
-    this.getMerchantDB = function () {
-        return merchant;
-    };
+    // this.getMerchantDB = function () {
+    //     return merchant;
+    // };
 
-    this.getPropertiesDB = function () {
-        return properties;
-    };
+    // this.getPropertiesDB = function () {
+    //     return properties;
+    // };
 
-    this.getTransactionDB = function () {
-        return transaction;
-    };
+    // this.getTransactionDB = function () {
+    //     return transaction;
+    // };
 
 }
 
