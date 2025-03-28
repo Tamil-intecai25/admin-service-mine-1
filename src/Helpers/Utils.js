@@ -21,14 +21,11 @@ let jwt = require("jsonwebtoken");
 let Responder = require("../Helpers/Responder");
 const AreaModel = require("../Models/AreaModel");
 const SellerModel = require("../Models/SellerModel");
-const PartnerModel = require("../Models/PartnerModel");
 let { ResMessage } = require("../Helpers/ResMessage");
 let moment = require("moment");
 let bcrypt = require("bcrypt");
-const nanoid = customAlphabet(
-  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
-  10
-);
+const nanoid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', 10);
+
 
 // const { password } = require('keygenerator/lib/keygen');
 
@@ -37,6 +34,7 @@ const nanoid = customAlphabet(
 // const AdminModel = require("../Models/AdminModel");
 // const RoleModel = require('../Models/RoleModel').getRoleModel();
 // const MenuMapModel = require("../Models/MenuMapModel").getMenuMapModel();
+
 
 function Utils() {
   let self = this;
@@ -48,85 +46,68 @@ function Utils() {
 
   this.findZonesContainingUser = async function (res, req) {
     try {
-      // console.log(req.query);return;
+        // console.log(req.query);return;
+        
+        let userLat = parseFloat(req.query.lat);
+        let userLong = parseFloat(req.query.long); 
 
-      let userLat = parseFloat(req.query.lat);
-      let userLong = parseFloat(req.query.long);
+        // console.log(typeof userLong);return;
 
-      // console.log(typeof userLong);return;
-
-      if (!userLat || !userLong) {
-        return Responder.sendFailure(
-          res,
-          "Latitude and Longitude are required",
-          400
-        );
-      }
-
-      // Step 1: Find the area where user's lat-long falls in
-      let allAreas = await AreaModel.find();
-      let matchedZoneId = null;
-
-      for (const area of allAreas) {
-        let polygon = area.polygoneLatelong.map((coord) => [
-          coord.lat,
-          coord.lng,
-        ]);
-        // console.log("polygon",polygon,"polygon");return;
-        // console.log(Utils.isPointInPolygon([userLat, userLong], polygon),"IAMM");return;
-        if (this.isPointInPolygon([userLat, userLong], polygon)) {
-          matchedZoneId = area.zoneId;
-          break;
+        if (!userLat || !userLong) {
+            return Responder.sendFailure(res, "Latitude and Longitude are required", 400);
         }
-      }
 
-      if (!matchedZoneId) {
-        return Responder.sendFailure(
-          res,
-          "No zones found for the given location",
-          404
-        );
-      }
+        // Step 1: Find the area where user's lat-long falls in
+        let allAreas = await AreaModel.find();
+        let matchedZoneId = null;
+        
+        for (const area of allAreas) {
+            let polygon = area.polygoneLatelong.map(coord => [coord.lat, coord.lng]);
+            // console.log("polygon",polygon,"polygon");return;
+            // console.log(Utils.isPointInPolygon([userLat, userLong], polygon),"IAMM");return;
+            if (this.isPointInPolygon([userLat, userLong], polygon)) {
+                matchedZoneId = area.zoneId;
+                break;
+            }
+        }
 
-      let zoneAreas = await AreaModel.find({ zoneId: matchedZoneId });
+        if (!matchedZoneId) {
+            return Responder.sendFailure(res, "No zones found for the given location", 404);
+        }
 
-      let sellersInZone = [];
+        let zoneAreas = await AreaModel.find({ zoneId: matchedZoneId });
 
-      for (const zoneArea of zoneAreas) {
-        let areaPolygon = zoneArea.polygoneLatelong.map((coord) => [
-          coord.lat,
-          coord.lng,
-        ]);
+        let sellersInZone = [];
 
-        let sellers = await SellerModel.find({
-          "location.branch.lat": { $exists: true },
-          "location.branch.long": { $exists: true },
-        });
+        for (const zoneArea of zoneAreas) {
+            let areaPolygon = zoneArea.polygoneLatelong.map(coord => [coord.lat, coord.lng]);
 
-        sellers.forEach((seller) => {
-          let sellerLat = seller.location.branch.lat;
-          let sellerLong = seller.location.branch.long;
+            let sellers = await SellerModel.find({
+                "location.branch.lat": { $exists: true },
+                "location.branch.long": { $exists: true }
+            });
 
-          if (this.isPointInPolygon([sellerLat, sellerLong], areaPolygon)) {
-            sellersInZone.push(seller);
-          }
-        });
-      }
+            sellers.forEach(seller => {
+                let sellerLat = seller.location.branch.lat;
+                let sellerLong = seller.location.branch.long;
 
-      if (sellersInZone.length > 0) {
-        return sellersInZone;
-      } else {
-        return Responder.sendFailure(
-          res,
-          "No sellers found inside the zone",
-          404
-        );
-      }
+                if (this.isPointInPolygon([sellerLat, sellerLong], areaPolygon)) {
+                    sellersInZone.push(seller);
+                }
+            });
+        }
+
+        if (sellersInZone.length > 0) {
+            return sellersInZone
+        } else {
+            return Responder.sendFailure(res, "No sellers found inside the zone", 404);
+        }
+
     } catch (error) {
-      console.error("Error finding zones and sellers:", error);
-      return Responder.sendFailure(res, "Something went wrong", 500);
+        console.error("Error finding zones and sellers:", error);
+        return Responder.sendFailure(res, "Something went wrong", 500);
     }
-  };
+};
 
   this.calculateDistance = function (lat1, lon1, lat2, lon2) {
     const toRadians = (degree) => (degree * Math.PI) / 180;
@@ -147,157 +128,38 @@ function Utils() {
     return R * c; // Distance in kilometers
   };
 
+  this.calculateDistanceOne = function (lat1, lon1, lat2, lon2) {
+    const R = 6371; // Radius of the Earth in km
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in km
+};
+
+
   this.isPointInPolygon = function (point, polygon) {
     let [x, y] = point;
     let inside = false;
 
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      let [xi, yi] = polygon[i];
-      let [xj, yj] = polygon[j];
+        let [xi, yi] = polygon[i];
+        let [xj, yj] = polygon[j];
 
-      let intersect =
-        yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+        let intersect = ((yi > y) !== (yj > y)) &&
+                        (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
 
-      if (intersect) inside = !inside;
+        if (intersect) inside = !inside;
     }
 
     return inside;
-  };
+}
 
-  this.convertSecondsToMinutes = function (seconds) {
-    let minutes = Math.floor(seconds / 60); // Get whole minutes
-    let remainingSeconds = seconds % 60; // Get remaining seconds
-    return `${minutes} min${minutes !== 1 ? "s" : ""} ${
-      remainingSeconds > 0 ? remainingSeconds + " sec" : ""
-    }`;
-  };
 
-  const axios = require("axios");
-
-  this.findZonesContainingDeliveryPartner = async function (res, req) {
-    try {
-      let sellerLat = req.body.lat; 
-      let sellerLong = req.body.long;
-
-      if (!sellerLat || !sellerLong) {
-        return Responder.sendFailure(
-          res,
-          "Latitude and Longitude are required",
-          400
-        );
-      }
-
-      // Step 1: Find the Area ID where the seller's location falls
-      let allAreas = await AreaModel.find();
-      let matchedArea = allAreas.find((area) =>
-        this.isPointInPolygon(
-          [sellerLat, sellerLong],
-          area.polygoneLatelong.map((coord) => [coord.lat, coord.lng])
-        )
-      );
-
-      if (!matchedArea) {
-        return undefined;
-      }
-
-      let zoneId = matchedArea.zoneId;
-
-      // Step 2: Get all areas mapped to the same Zone ID
-      let mappedAreas = await AreaModel.find({ zoneId });
-
-      // Step 3: Get all partners in these mapped areas
-      let partnersInZone = [];
-      for (const area of mappedAreas) {
-        let areaPolygon = area.polygoneLatelong.map((coord) => [
-          coord.lat,
-          coord.lng,
-        ]);
-
-        let partners = await PartnerModel.find({
-          "location.lat": { $exists: true },
-          "location.long": { $exists: true },
-        });
-
-        partners.forEach((partner) => {
-          let partnerLat = partner.location.lat;
-          let partnerLong = partner.location.long;
-          if (this.isPointInPolygon([partnerLat, partnerLong], areaPolygon)) {
-            partnersInZone.push(partner);
-          }
-        });
-      }
-
-      if (partnersInZone.length === 0) {
-        return Responder.sendFailure(
-          res,
-          "No delivery partners found in this zone",
-          404
-        );
-      }
-
-      // Step 4: Find the nearest delivery partner using Google Distance Matrix API
-      let destinations = partnersInZone
-        .map((partner) => `${partner.location.lat},${partner.location.long}`)
-        .join("|");
-
-      let googleMapsAPIKey = "AIzaSyBdgzn86CxjJDfA5PHD6Wq07a6Dlyh7F0s";
-
-      let distanceMatrixUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${sellerLat},${sellerLong}&destinations=${destinations}&key=${googleMapsAPIKey}`;
-
-      let distanceResponse = await axios.get(distanceMatrixUrl);
-
-      let distances = distanceResponse.data.rows[0].elements;
-
-      console.log(distances, "...................>distances");
-
-      let nearestPartner = null;
-      let minDistance = Infinity;
-
-      partnersInZone.forEach((partner, index) => {
-        let distance = distances[index].distance?.value || Infinity;
-        if (distance < minDistance) {
-          minDistance = distance;
-          console.log(distance, "----------->dis");
-          nearestPartner = { partner, ...distances[index] };
-        }
-      });
-
-      if (!nearestPartner) {
-        return Responder.sendFailure(res, "No nearby partner found", 404);
-      }
-
-      // // Step 5: Get directions and ETA using Google Directions API
-      // let directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${sellerLat},${sellerLong}&destination=${nearestPartner.location.lat},${nearestPartner.location.long}&key=${googleMapsAPIKey}`;
-
-      // let directionsResponse = await axios.get(directionsUrl);
-
-      // console.log(directionsResponse, "------------->direction response");
-      // let routeData = directionsResponse.data.routes[0];
-
-      // console.log(routeData, "routeData=>>>>>>>>>>>>>>>>>>>>>");
-      // let eta = routeData.legs[0].duration.text; // Estimated time of arrival
-      // let distanceText = routeData.legs[0].distance.text; // Distance in km/miles
-      // let steps = routeData.legs[0].steps.map((step) => step.html_instructions); // Step-by-step directions
-
-      // console.log(
-      //   eta,
-      //   distanceText,
-      //   steps,
-      //   "---------------------------------->all"
-      // );
-
-      return {
-        nearestPartner,
-        allPartners: partnersInZone,
-        // eta,
-        // distance: distanceText,
-        // directions: steps,
-      };
-    } catch (error) {
-      console.error("Error finding nearest partner:", error);
-      return Responder.sendFailure(res, "Something went wrong", 500);
-    }
-  };
 
   this.createUserInKong = function (username, callback) {
     request.post(
@@ -370,22 +232,16 @@ function Utils() {
     return req.headers["x-consumer-username"];
   };
 
-  this.getUser = async (req) => {
-    let userId = this.getUserId(req);
-    let roleUser = await AdminModel.findOne({
-      userId,
-      hasDeleted: { $ne: true },
-    });
-    return roleUser;
-  };
-  this.getMerchant = async (req) => {
-    let merchantId = this.getUserId(req);
-    console.log(merchantId, "hsdjkhskdsh");
-    let roleUser = await MerchantModel.findOne({
-      merchantId,
-      hasDeleted: { $ne: true },
-    });
-    return roleUser;
+  this.getUser = async (req) =>{
+            let userId = this.getUserId(req);
+            let roleUser = await AdminModel.findOne({userId, hasDeleted : {$ne : true}});
+            return roleUser;
+    };
+  this.getMerchant = async (req) =>{
+          let merchantId = this.getUserId(req);
+          console.log(merchantId, "hsdjkhskdsh")
+          let roleUser = await MerchantModel.findOne({merchantId, hasDeleted : {$ne : true}});
+          return roleUser;
   };
 
   this.getTransactionId = function () {
@@ -553,45 +409,36 @@ function Utils() {
     });
   };
 
-  this.checkMenuAccess = async (roleCode, menuId) => {
-    let role = await RoleModel.findOne({
-      roleCode,
-      status: "active",
-      hasDeleted: { $ne: true },
-    });
+    this.checkMenuAccess = async (roleCode, menuId) => {
 
-    if (roleCode === "SUPERADMIN11") return true;
-    if (!role) return false;
+        let role = await RoleModel.findOne({roleCode, status : "active", hasDeleted : {$ne : true}});
 
-    let haveMenuAccess;
+        if(roleCode === "SUPERADMIN11")
+            return true;
+        if(!role)
+            return false;
 
-    let menu = await MenuMasterModel.findOne({
-      menuId,
-      hasDeleted: { $ne: true },
-    });
+        let haveMenuAccess;
 
-    if (menu.menuType == "merchant") return true;
+        let menu = await MenuMasterModel.findOne({menuId, hasDeleted : {$ne : true}});
 
-    if (menu.isParentMenu == true) {
-      let childMenus = await MenuMasterModel.find(
-        { parentId: menuId, hasDeleted: { $ne: true } },
-        "menuId -_id"
-      );
-      childMenus = await childMenus.map((childMenu) => childMenu.menuId);
-      console.log(childMenus, menuId, "skljdhdjsh");
-      haveMenuAccess = await MenuMapModel.findOne({
-        roleId: role.roleId,
-        menuId: { $in: childMenus },
-      });
-    } else
-      haveMenuAccess = await MenuMapModel.findOne({
-        roleId: role.roleId,
-        menuId,
-      });
+        if(menu.menuType == 'merchant')
+            return true;
 
-    if (!haveMenuAccess) return false;
-    else return true;
-  };
+        if(menu.isParentMenu == true){
+                let childMenus = await MenuMasterModel.find({parentId : menuId, hasDeleted : {$ne : true}}, 'menuId -_id');
+                childMenus = await childMenus.map((childMenu)=> childMenu.menuId);
+                console.log(childMenus, menuId, "skljdhdjsh");
+                haveMenuAccess = await MenuMapModel.findOne({roleId : role.roleId, menuId : {$in : childMenus}});
+            }
+        else
+                haveMenuAccess = await MenuMapModel.findOne({roleId : role.roleId, menuId});
+
+        if(!haveMenuAccess)
+            return false;
+        else
+            return true;
+    }
 
   this.transferDomesticnew = function (data, callback) {
     //   65.2.20.236:17000/api/bank/yes/ft/transfer/request
@@ -811,179 +658,174 @@ function Utils() {
       ? Math.floor(100000 + Math.random() * 900000)
       : 123456;
 
-  this.createHash = async function (plainTextPassword) {
-    // Hashing user's salt and password with 10 iterations,
-    const saltRounds = 10;
-    // First method to generate a salt and then create hash
-    const salt = await bcrypt.genSalt(saltRounds);
-    return await bcrypt.hash(plainTextPassword, salt);
-    // Second mehtod - Or we can create salt and hash in a single method also
-    // return await bcrypt.hash(plainTextPassword, saltRounds);
-  };
+    this.createHash = async function ( plainTextPassword ) {
+        // Hashing user's salt and password with 10 iterations,
+        const saltRounds = 10;
+        // First method to generate a salt and then create hash
+        const salt = await bcrypt.genSalt(saltRounds);
+        return await bcrypt.hash(plainTextPassword, salt);
+        // Second mehtod - Or we can create salt and hash in a single method also
+        // return await bcrypt.hash(plainTextPassword, saltRounds);
+    };
 
-  this.checkMenuAccess = async (roleCode, menuId) => {
-    let role = await RoleModel.findOne({
-      roleCode,
-      status: "active",
-      hasDeleted: { $ne: true },
-    });
+    this.checkMenuAccess = async (roleCode, menuId) => {
 
-    if (roleCode === "SUPERADMIN11") return true;
-    if (!role) return false;
+        let role = await RoleModel.findOne({roleCode, status : "active", hasDeleted : {$ne : true}});
 
-    let haveMenuAccess;
+        if(roleCode === "SUPERADMIN11")
+            return true;
+        if(!role)
+            return false;
 
-    let menu = await MenuMasterModel.findOne({
-      menuId,
-      hasDeleted: { $ne: true },
-    });
+        let haveMenuAccess;
 
-    if (menu.menuType == "merchant") return true;
+        let menu = await MenuMasterModel.findOne({menuId, hasDeleted : {$ne : true}});
 
-    if (menu.isParentMenu == true) {
-      let childMenus = await MenuMasterModel.find(
-        { parentId: menuId, hasDeleted: { $ne: true } },
-        "menuId -_id"
-      );
-      childMenus = await childMenus.map((childMenu) => childMenu.menuId);
-      console.log(childMenus, menuId, "skljdhdjsh");
-      haveMenuAccess = await MenuMapModel.findOne({
-        roleId: role.roleId,
-        menuId: { $in: childMenus },
-      });
-    } else
-      haveMenuAccess = await MenuMapModel.findOne({
-        roleId: role.roleId,
-        menuId,
-      });
+        if(menu.menuType == 'merchant')
+            return true;
 
-    if (!haveMenuAccess) return false;
-    else return true;
-  };
+        if(menu.isParentMenu == true){
+                let childMenus = await MenuMasterModel.find({parentId : menuId, hasDeleted : {$ne : true}}, 'menuId -_id');
+                childMenus = await childMenus.map((childMenu)=> childMenu.menuId);
+                console.log(childMenus, menuId, "skljdhdjsh");
+                haveMenuAccess = await MenuMapModel.findOne({roleId : role.roleId, menuId : {$in : childMenus}});
+            }
+        else
+                haveMenuAccess = await MenuMapModel.findOne({roleId : role.roleId, menuId});
 
-  this.apiRouteCheckListByRole = (roleType) => {
-    let routelist = [];
-    if (roleType == "admin") {
-      let deepCloned = JSON.parse(JSON.stringify(AdminRouteList.admin));
-      routelist = deepCloned.map((e) => {
-        let group = e.route_list.map((groupObj) => groupObj.group);
-        return group;
-      });
-    } else if (roleType == "merchant") {
-      let deepCloned = JSON.parse(JSON.stringify(MerchantRoutelist.merchant));
-      routelist = deepCloned.map((e) => {
-        let group = e.route_list.map((groupObj) => groupObj.group);
-        return group;
-      });
+        if(!haveMenuAccess)
+            return false;
+        else
+            return true;
     }
 
-    return routelist;
-  };
+  this.apiRouteCheckListByRole =  (roleType) =>{
+    let routelist=[];
+      if(roleType == 'admin'){
+         let deepCloned = JSON.parse(JSON.stringify(AdminRouteList.admin));
+                  routelist = deepCloned.map(e => 
+                              {  
+                              let group = e.route_list.map(groupObj => groupObj.group)
+                              return group;
+                              });
+              }
+      else if(roleType == 'merchant'){
+         let deepCloned = JSON.parse(JSON.stringify(MerchantRoutelist.merchant));
+                  routelist = deepCloned.map(e => 
+                              {  
+                              let group = e.route_list.map(groupObj => groupObj.group)
+                              return group;
+                              });
+              }
 
-  this.getUserRoleApiRouteCheckListByRole = async (authUser, roleType) => {
-    let createRoutelist = [];
+      return routelist;
+  }
 
-    if (roleType == "admin") {
-      if (authUser?.accType == "superAdmin") {
-        const deepCloned = JSON.parse(JSON.stringify(AdminRouteList.admin));
-        createRoutelist = deepCloned;
-      } else {
-        let authUserRole = await RoleModel.findOne({
-          roleCode: authUser.role?.roleCode,
-          hasDeleted: { $ne: true },
-        });
-        let privileges = authUserRole.privileges;
 
-        const deepCloned = JSON.parse(JSON.stringify(AdminRouteList.admin));
-        createRoutelist = deepCloned.filter((e) => {
-          let filtered_route_list = e.route_list.filter((groupObj) =>
-            privileges.includes(groupObj.group)
-          );
-          e.route_list = filtered_route_list;
-          return e.route_list != false;
-        });
-      }
-    } else if (roleType == "merchant") {
-      let deepCloned = JSON.parse(JSON.stringify(MerchantRoutelist.merchant));
-      createRoutelist = deepCloned;
-    }
+this.getUserRoleApiRouteCheckListByRole = async (authUser, roleType) =>{
+    let createRoutelist=[];
 
-    return createRoutelist;
-  };
+      if(roleType == 'admin'){
 
-  this.getUserRoleUpdateApiRouteCheckList = async (authUser, role) => {
-    let updateRoutelist = [];
-
-    console.log(
-      "jhhdksjdhksj",
-      authUser?.accType,
-      role?.roleType,
-      "hjkhdksjhdsj"
-    );
-
-    if (role?.roleType == "admin") {
-      if (authUser?.accType == "superAdmin") {
-        const deepCloned = JSON.parse(JSON.stringify(AdminRouteList.admin));
-        updateRoutelist = deepCloned.map((e) => {
-          e.route_list.map((groupObj) => {
-            if (role?.privileges.includes(groupObj.group)) {
-              groupObj.is_enabled = true;
-            }
-          });
-          return e;
-        });
-      } else {
-        updateRoutelist = await this.getUserRoleApiRouteCheckListByRole(
-          authUser,
-          role?.roleType
-        );
-
-        updateRoutelist = await updateRoutelist.map((e) => {
-          e.route_list.map((groupObj) => {
-            if (role?.privileges.includes(groupObj.group)) {
-              groupObj.is_enabled = true;
-            }
-          });
-          return e;
-        });
-        console.log(updateRoutelist);
-      }
-    } else if (role?.roleType == "merchant") {
-      let deepCloned = JSON.parse(JSON.stringify(MerchantRoutelist.merchant));
-
-      updateRoutelist = await deepCloned.map((e) => {
-        e.route_list.map((groupObj) => {
-          if (role?.privileges.includes(groupObj.group)) {
-            groupObj.is_enabled = true;
+          if(authUser?.accType == 'superAdmin'){
+            const deepCloned = JSON.parse(JSON.stringify(AdminRouteList.admin));
+              createRoutelist = deepCloned;
           }
-        });
-        return e;
-      });
-    }
+          else{
+            let authUserRole = await RoleModel.findOne({roleCode : authUser.role?.roleCode, hasDeleted : {$ne : true}});
+            let privileges = authUserRole.privileges;
 
-    return updateRoutelist;
-  };
+            const deepCloned = JSON.parse(JSON.stringify(AdminRouteList.admin));
+            createRoutelist = deepCloned.filter(e => 
+                                {  
+                                 let filtered_route_list = e.route_list.filter(groupObj => 
+                                     privileges.includes(groupObj.group)
+                                )
+                                 e.route_list = filtered_route_list;
+                                 return e.route_list != false;
+                                });
+          }
+      }
+      else if(roleType == 'merchant'){
+         let deepCloned = JSON.parse(JSON.stringify(MerchantRoutelist.merchant));
+         createRoutelist = deepCloned;
+      }
 
-  this.getDefautApiRouteGroups = (roleType) => {
-    let routelist = [];
-    if (roleType == "admin") {
-      routelist = AdminRouteList?.adminDefaultApiGroups;
-    } else if (roleType == "merchant") {
-      routelist = MerchantRoutelist?.merchantDefaultApiGroups;
-    }
-    return routelist;
-  };
+      return createRoutelist;
+}
+
+
+this.getUserRoleUpdateApiRouteCheckList = async (authUser, role) =>{
+    let updateRoutelist=[];
+
+          console.log("jhhdksjdhksj", authUser?.accType, role?.roleType, "hjkhdksjhdsj");
+
+          if(role?.roleType == 'admin'){
+
+              if(authUser?.accType == 'superAdmin'){
+                const deepCloned = JSON.parse(JSON.stringify(AdminRouteList.admin));
+                  updateRoutelist = deepCloned.map(e =>{
+                      e.route_list.map(groupObj => {
+                                        if(role?.privileges.includes(groupObj.group)){
+                                           groupObj.is_enabled = true;
+                                        }
+                                      });
+                      return  e;
+                  });
+              }
+            else{
+
+                updateRoutelist = await this.getUserRoleApiRouteCheckListByRole(authUser, role?.roleType);
+
+                updateRoutelist = await updateRoutelist.map(e =>{
+                      e.route_list.map(groupObj => {
+                                        if(role?.privileges.includes(groupObj.group)){
+                                           groupObj.is_enabled = true;
+                                        }
+                                      });
+                      return  e;
+                  });
+                  console.log(updateRoutelist)
+              }
+          }
+          else if(role?.roleType == 'merchant'){
+
+            let deepCloned = JSON.parse(JSON.stringify(MerchantRoutelist.merchant));
+
+            updateRoutelist = await deepCloned.map(e =>{
+                      e.route_list.map(groupObj => {
+                                        if(role?.privileges.includes(groupObj.group)){
+                                           groupObj.is_enabled = true;
+                                        }
+                                      });
+                      return  e;
+                  });
+          }
+    
+        return updateRoutelist;
+}
+
+  this.getDefautApiRouteGroups =  (roleType) =>{
+    let routelist=[];
+      if(roleType == 'admin'){
+                  routelist = AdminRouteList?.adminDefaultApiGroups;
+              }
+      else if(roleType == 'merchant'){
+                  routelist = MerchantRoutelist?.merchantDefaultApiGroups;
+              }
+      return routelist;
+}
 
   this.activateAccount = function (data, callback) {
     //console.log(bank_info)
     console.log(data.merchantId);
     let body = {
-      name: data.fullName,
-      mobile: {
-        national_number: data.phone.number,
+      "name": data.fullName,
+      "mobile": {
+          "national_number": data.phone.number
       },
-      email: data?.email,
-    };
+      "email": data?.email
+  };
     //   console.log(auth)
     let options = {
       url: "http://172.31.33.43:8085/api/payout/merchant/account/create",
@@ -996,33 +838,37 @@ function Utils() {
     console.log(options);
     request.post(options, function (error, response, body) {
       console.log("error", error, "Body", body);
-      callback(error, body);
+      callback(error,  body);
     });
   };
 
-  this.sendOTPSMS = function (data) {};
+  this.sendOTPSMS = function(data){
+    
+  }
 
-  this.quickBerrySMSFunc = function (data, callback) {
-    let options = {
-      url: "https://alerts.qikberry.com/api/v2/sms/send",
-      method: "POST",
-      headers: {
-        Authorization: "Bearer fc92a8d1d825afacba62d7e732ef6827",
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        sender: "IPPOPA",
-        service: "T",
-        message,
-        to,
-      }),
-    };
-    request.post(options, function (err, resp, body) {
-      if (body) callback(null, body);
-      else callback(err, null);
-    });
-  };
+  this.quickBerrySMSFunc = function(data, callback){
+      let options = {
+            url: 'https://alerts.qikberry.com/api/v2/sms/send',
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer fc92a8d1d825afacba62d7e732ef6827',
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sender: 'IPPOPA',
+                service: 'T',
+                message,
+                to
+            })
+        }
+      request.post(options, function(err, resp, body){
+        if(body)
+          callback(null, body)
+        else callback(err, null)
+      })
+  }
+
 }
 
 module.exports = new Utils();

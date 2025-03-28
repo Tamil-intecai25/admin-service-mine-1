@@ -1,90 +1,70 @@
-// server.js
-const dotenv = require("dotenv");
+const dotenv = require('dotenv');
 dotenv.config();
-const http = require("http");
-const express = require("express");
-const cors = require("cors");
-const morgan = require("morgan");
-const bodyParser = require("body-parser");
-const helmet = require("helmet");
-const path = require("path");
-const fs = require("fs");
-const nocache = require("nocache");
-const Responder = require("./src/Helpers/Responder");
-const { initializeSocket } = require("./src/Helpers/socketIo");
 
-const app = express();
+let Config = require('./src/Configs/Config');
 
-var accessLogStream = fs.createWriteStream(path.join(__dirname, "access.log"), {
-  flags: "a",
-});
+let express = require('express');
+let app = express();
+let cors = require('cors');
+let morgan = require('morgan');
+let bodyParser = require('body-parser');
+let helmet = require('helmet');
+let path = require('path');
+let fs = require('fs');
+const nocache = require('nocache');
+const jwt = require("jsonwebtoken");
 
-app.use(morgan("combined", { stream: accessLogStream }));
+const Responder = require('./src/Helpers/Responder');
 
-const server = http.createServer(app);
+var accessLogStream = fs.createWriteStream(path.join(__dirname, 'access.log'), { flags: 'a' });
 
-const { io, sellers, users, deliveryPartners } = initializeSocket(
-  7008,
-  "http://localhost:7007"
-);
-
-module.exports = { io, sellers, deliveryPartners };
-
-app.use((req, res, next) => {
-  req.io = io;
-  req.deliveryPartners = deliveryPartners;
-  req.sellers = sellers;
-  req.users = users;
-  next();
-});
+app.use(morgan('combined', { stream: accessLogStream }));
 app.use(helmet());
 app.use(cors());
 app.use(nocache());
 
+
 app.use(
-  bodyParser.json({
-    limit: "50mb",
-  })
+    bodyParser.json({
+        limit: '50mb'
+    })
 );
 
-require("./src/Database/Connection").createConnection();
+
+require('./src/Database/Connection').createConnection();
 
 app.use(bodyParser.json());
 
 app.use(
-  bodyParser.urlencoded({
-    limit: "50mb",
-    extended: false,
-    parameterLimit: 1000000,
-  })
+    bodyParser.urlencoded({
+        limit: '50mb',
+        extended: false,
+        parameterLimit: 1000000
+    })
 );
-
 function handleJsonParsingError(err, req, res, next) {
-  if (err instanceof SyntaxError && err.message.includes("JSON")) {
-    return Responder.sendFailure(
-      res,
-      "Invalid JSON format in request body",
-      400,
-      {}
-    );
-  }
-  next(err);
+    if (err instanceof SyntaxError && err.message.includes('JSON')) {
+        return Responder.sendFailure(res, 'Invalid JSON format in request body', 400, {});
+    }
+    
+    next(err);
 }
 
 app.use(handleJsonParsingError);
 
 app.use(require("./src/Routes/MainRouter"));
 
-app.listen(7007, (err) => {
-  if (err) {
-    console.error("Error in server setup:", err);
-    process.exit(1);
-  } else {
-    console.log(`Server is running on port 7007`);
-  }
+app.listen(7007, (err) => { 
+    if (err) {
+        console.error('Error in server setup:', err);
+        process.exit(1); // Exit if server setup fails
+    } else {
+        console.log(`Server is running on port 7007`);
+    }
 });
 
-// 404 Error Page
+
+//404 Error Pagek 
 app.use(function (req, res) {
-  return Responder.sendFailure(res, "Request Not Found", 404, {});
+    return Responder.sendFailure(res, "Request Not Found", 404, {});
 });
