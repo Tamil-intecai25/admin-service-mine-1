@@ -37,3 +37,4 @@ temp/
 
 # Coverage reports (if using testing tools)
 coverage/
+.env
