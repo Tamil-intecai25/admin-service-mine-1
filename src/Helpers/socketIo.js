@@ -51,7 +51,7 @@ const axios = require("axios");
 const initializeSocket = (port, apiBaseUrl) => {
   const io = new Server(port, {
     cors: {
-      origin: "http://localhost:5173",
+      origin: "*",
       methods: ["GET", "POST"],
     },
   });
@@ -88,8 +88,9 @@ const initializeSocket = (port, apiBaseUrl) => {
 
     // Register seller
     socket.on("registerSeller", async (sellerId) => {
+      console.log(sellerId, "---------------->sell");
       try {
-        sellers.set(sellerId, socket.id);
+        sellers.set(sellerId.sellerId, socket.id);
         console.log(`Seller ${sellerId} connected with socket ID ${socket.id}`);
         // await axios.post(`${apiBaseUrl}/api/seller/register`, {
         //   sellerId,
@@ -109,10 +110,34 @@ const initializeSocket = (port, apiBaseUrl) => {
       }
     });
 
+    socket.on("partnerLocationUpdate", (data) => {
+      //***********type*************/
+      // {
+      //   partnerId: string,
+      //   orderId: string,
+      //   location: { lat: number, lng: number },
+      // }
+      console.log(data, "----------------->");
+
+      const { partnerId, orderId, location } = data;
+
+      console.log(`Location update from partner ${partnerId}:`, location);
+
+      // Broadcast to relevant seller and user if they exist
+      const orderData = { partnerId, orderId, location };
+      sellers.forEach((socketId) =>
+        io.to(socketId).emit("partnerLocationUpdate", orderData)
+      );
+      users.forEach((socketId) =>
+        io.to(socketId).emit("partnerLocationUpdate", orderData)
+      );
+    });
+
+    // Hand
     // Register delivery partner
     socket.on("registerDeliveryPartner", async (partnerId) => {
       try {
-        deliveryPartners.set(partnerId, socket.id);
+        deliveryPartners.set(partnerId.partnerId, socket.id);
         console.log(
           `Delivery Partner ${partnerId} connected with socket ID ${socket.id}`
         );

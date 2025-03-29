@@ -267,7 +267,10 @@ function Controller() {
             value: overallETA.toString(),
             date: new Date(Date.now() + overallETA * 1000).toISOString(),
           },
-          totalDistance: `${(totalDistance / 1000).toFixed(2)} km`,
+          totalDistance: {
+            text: `${(totalDistance / 1000).toFixed(2)} km`,
+            value: totalDistance,
+          },
         },
       };
 
@@ -305,6 +308,7 @@ function Controller() {
       }
 
       if (partnerSocketId) {
+        console.log(partnerSocketId, "startngid");
         io.to(partnerSocketId).emit("orderAssigned", {
           orderId: order.orderId,
           sellerId: order.seller.sellerId,
@@ -337,6 +341,8 @@ function Controller() {
     try {
       const { orderId, partnerId } = req.query;
 
+      const { io, sellers, users } = req;
+
       if (!orderId || !partnerId) {
         return Responder.sendFailure(res, "Missing required fields", 400);
       }
@@ -350,14 +356,11 @@ function Controller() {
       if (!order) {
         return Responder.sendFailure(res, "Order not found", 404);
       }
-      console.log(111);
       // Update the accepted timestamp if not already set
       if (order) {
-        console.log("--------------->");
         order.deliveryPartner.timestamps.acceptedAt = new Date();
         await order.save();
       }
-      console.log(222);
       // Prepare route data for delivery partner to seller
       const routeToSeller = {
         distance: order.mapsData.deliveryPartnerToSeller.distance,
@@ -371,6 +374,36 @@ function Controller() {
         from: order.seller.location,
         to: order.user.location,
       };
+
+      const sellerSocketId = sellers.get(order.seller.sellerId);
+
+      const userSocketId = users.get(order.user.userId);
+      if (userSocketId) {
+        io.to(userSocketId).emit("orderStatusUpdateToUser", {
+          orderId: order.orderId,
+          sellerId: order.seller.sellerId,
+          deliveryDetails: order.deliveryPartner,
+          mapsData: order.mapsData,
+          message: "Order is accepeted by partner",
+        });
+        console.log(`Notified user ${order.user.userId}`);
+      } else {
+        console.log(`user ${order.user.userId} not connected`);
+      }
+
+      if (sellerSocketId) {
+        io.to(sellerSocketId).emit("orderStatusUpdateToSeller", {
+          orderId: order.orderId,
+          sellerId: order.seller.sellerId,
+          deliveryDetails: order.deliveryseller,
+          mapsData: order.mapsData,
+          message: " order is accepted",
+        });
+        console.log(`Notified  seller ${order.seller.sellerId}`);
+      } else {
+        console.log(` seller ${order.seller.sellerId} not connected`);
+      }
+
       return Responder.sendSuccess(res, "Order accepted", 200, {
         order,
         route: { routeToSeller, routeToUser },
@@ -470,6 +503,171 @@ function Controller() {
       return Responder.sendFailure(res, "Something went wrong", 500);
     }
   };
+  this.statusUpdate = async function (req, res) {
+    try {
+      const { orderId, userId, status } = req.query;
+      const { io, sellers, deliveryPartners, users } = req;
+
+      if (!orderId || !userId || !status) {
+        return Responder.sendFailure(res, "Missing required fields", 400);
+      }
+
+      const userType = userId.split("_")[0];
+      let order;
+      const validStatuses = {
+        seller: ["ready"],
+        partner: ["reached", "picked_up", "delivered"],
+        user: ["cancelled"],
+      };
+
+      const notifyAllParties = (order, message) => {
+        const sellerSocketId = sellers.get(order.seller.sellerId);
+        const partnerSocketId = deliveryPartners.get(
+          order.deliveryPartner.partnerId
+        );
+        const userSocketId = users.get(order.user.userId);
+
+        const notificationData = {
+          orderId: order.orderId,
+          sellerId: order.seller.sellerId,
+          deliveryDetails: order.deliveryPartner,
+          mapsData: order.mapsData,
+          status: order.status,
+          message,
+        };
+
+        if (sellerSocketId) {
+          io.to(sellerSocketId).emit("statusUpdate", notificationData);
+          console.log(`Notified seller ${order.seller.sellerId}`);
+        }
+
+        if (partnerSocketId) {
+          io.to(partnerSocketId).emit("statusUpdate", notificationData);
+          console.log(`Notified partner ${order.deliveryPartner.partnerId}`);
+        }
+
+        if (userSocketId) {
+          io.to(userSocketId).emit("statusUpdate", notificationData);
+          console.log(`Notified user ${order.user.userId}`);
+        }
+      };
+
+      switch (userType) {
+        case "seller":
+          if (!validStatuses.seller.includes(status)) {
+            return Responder.sendFailure(res, "Invalid status for seller", 400);
+          }
+
+          order = await OrderModel.findOne({
+            orderId,
+            "seller.sellerId": userId,
+          });
+
+          if (!order) {
+            return Responder.sendFailure(res, "Order not found", 404);
+          }
+
+          if (status === "ready") {
+            order.status = status;
+            order.seller.timestamps.readyAt = new Date();
+            await order.save();
+            notifyAllParties(order, "Order is ready now!");
+          }
+          break;
+
+        case "partner":
+          if (!validStatuses.partner.includes(status)) {
+            return Responder.sendFailure(
+              res,
+              "Invalid status for partner",
+              400
+            );
+          }
+
+          order = await OrderModel.findOne({
+            orderId,
+            "deliveryPartner.partnerId": userId,
+          });
+
+          if (!order) {
+            return Responder.sendFailure(res, "Order not found", 404);
+          }
+
+          switch (status) {
+            case "reached":
+              order.deliveryPartner.timestamps.reachedPickupAt = new Date();
+              await order.save();
+              notifyAllParties(
+                order,
+                "Delivery partner has reached pickup location"
+              );
+              break;
+            case "picked_up":
+              order.deliveryPartner.timestamps.pickedUpAt = new Date();
+              order.seller.timestamps.pickedUpAt = new Date();
+              order.status = "picked_up";
+              await order.save();
+              notifyAllParties(order, "Order has been picked up");
+              break;
+            case "delivered":
+              order.deliveryPartner.timestamps.deliveredAt = new Date();
+              order.status = "delivered";
+              await order.save();
+              notifyAllParties(order, "Order has been delivered");
+              break;
+          }
+          break;
+
+        case "user":
+          if (!validStatuses.user.includes(status)) {
+            return Responder.sendFailure(res, "Invalid status for user", 400);
+          }
+
+          order = await OrderModel.findOne({
+            orderId,
+            "user.userId": userId,
+          });
+
+          if (!order) {
+            return Responder.sendFailure(res, "Order not found", 404);
+          }
+
+          if (status === "cancelled") {
+            order.user.timestamps.cancelledAt = new Date();
+            order.status = status;
+            await order.save();
+            notifyAllParties(order, "Order has been cancelled");
+          }
+          break;
+
+        default:
+          return Responder.sendFailure(res, "Invalid user type", 400);
+      }
+
+      if (!order) {
+        return Responder.sendFailure(res, "Order not found", 404);
+      }
+
+      if (userType === "partner" && status === "picked_up") {
+        const routeToUser = {
+          distance: order.mapsData.sellerToUser.distance,
+          duration: order.mapsData.sellerToUser.duration,
+          from: order.seller.location,
+          to: order.user.location,
+        };
+
+        return Responder.sendSuccess(res, "Order status updated", 200, {
+          order,
+          route: routeToUser,
+        });
+      }
+
+      return Responder.sendSuccess(res, "Order status updated", 200, { order });
+    } catch (error) {
+      console.error("Error updating order status:", error);
+      return Responder.sendFailure(res, "Something went wrong", 500);
+    }
+  };
 
   this.getOrdersByPartnerId = async function (req, res) {
     try {
@@ -488,8 +686,8 @@ function Controller() {
       }
 
       let latLong = [
-        { lat: 13.021793, long: 80.206473 },
-        { lat: 13.021615, long: 80.206494 },
+        // { lat: 13.021793, long: 80.206473 },
+        // { lat: 13.021615, long: 80.206494 },
         { lat: 13.021168, long: 80.206479 },
         { lat: 13.020177, long: 80.206468 },
         { lat: 13.019533, long: 80.20642 },
@@ -504,49 +702,49 @@ function Controller() {
         { lat: 13.022434, long: 80.206292 },
       ];
 
-      const partnerSocketId = deliveryPartners.get(
-        order.deliveryPartner.partnerId
-      );
+      // const partnerSocketId = deliveryPartners.get(
+      //   order.deliveryPartner.partnerId
+      // );
 
-      if (partnerSocketId) {
-        const sendCoordinates = async () => {
-          try {
-            for (let i = 0; i < latLong.length; i++) {
-              const coord = latLong[i];
-              // Check if socket is still connected before emitting
-              if (io.sockets.sockets.get(partnerSocketId)) {
-                io.to(partnerSocketId).emit("partnerLocationUpdate", {
-                  partnerId: order.deliveryPartner.partnerId,
-                  location: { lat: coord.lat, long: coord.long },
-                  message: "partnerLocationUpdate",
-                  sequence: i + 1, // Adding sequence number for debugging
-                  total: latLong.length, // Total number of coordinates
-                });
-                console.log(
-                  `Sent coordinate ${i + 1}/${
-                    latLong.length
-                  } to ${partnerSocketId}: ${coord.lat}, ${coord.long}`
-                );
-                await new Promise((resolve) => setTimeout(resolve, 2000));
-              } else {
-                console.log(
-                  `Socket ${partnerSocketId} disconnected during transmission`
-                );
-                break;
-              }
-            }
-            console.log(
-              `Completed sending all coordinates to ${partnerSocketId}`
-            );
-          } catch (error) {
-            console.error(`Error sending coordinates: ${error}`);
-          }
-        };
+      // if (partnerSocketId) {
+      //   const sendCoordinates = async () => {
+      //     try {
+      //       for (let i = 0; i < latLong.length; i++) {
+      //         const coord = latLong[i];
+      //         // Check if socket is still connected before emitting
+      //         if (io.sockets.sockets.get(partnerSocketId)) {
+      //           io.to(partnerSocketId).emit("partnerLocationUpdate", {
+      //             partnerId: order.deliveryPartner.partnerId,
+      //             location: { lat: coord.lat, long: coord.long },
+      //             message: "partnerLocationUpdate",
+      //             sequence: i + 1, // Adding sequence number for debugging
+      //             total: latLong.length, // Total number of coordinates
+      //           });
+      //           console.log(
+      //             `Sent coordinate ${i + 1}/${
+      //               latLong.length
+      //             } to ${partnerSocketId}: ${coord.lat}, ${coord.long}`
+      //           );
+      //           await new Promise((resolve) => setTimeout(resolve, 2000));
+      //         } else {
+      //           console.log(
+      //             `Socket ${partnerSocketId} disconnected during transmission`
+      //           );
+      //           break;
+      //         }
+      //       }
+      //       console.log(
+      //         `Completed sending all coordinates to ${partnerSocketId}`
+      //       );
+      //     } catch (error) {
+      //       console.error(`Error sending coordinates: ${error}`);
+      //     }
+      //   };
 
-        sendCoordinates();
-      } else {
-        console.log(`User ${order.user.userId} not connected`);
-      }
+      //   sendCoordinates();
+      // } else {
+      //   console.log(`User ${order.user.userId} not connected`);
+      // }
 
       return Responder.sendSuccess(res, "Orders get successfully", 201, order);
     } catch (error) {

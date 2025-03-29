@@ -33,4 +33,8 @@ app.post("/partner/pickup-order", function (req, res) {
   OrderController.acceptOrderForPartner(req, res);
 });
 
+app.put("/status", function (req, res) {
+  OrderController.statusUpdate(req, res);
+});
+
 module.exports = app;

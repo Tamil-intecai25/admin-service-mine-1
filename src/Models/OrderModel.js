@@ -11,7 +11,9 @@ let orderSchema = new AdminConnection.Schema(
         "pending",
         "accepted",
         "preparing",
+        "ready",
         "processing",
+        "picked_up",
         "out_for_delivery",
         "delivered",
         "cancelled",
@@ -83,6 +85,10 @@ let orderSchema = new AdminConnection.Schema(
           text: { type: String, default: null },
           value: { type: Number, default: null },
           date: { type: Date, default: null },
+        },
+        totalDistance: {
+          text: { type: String, default: null },
+          value: { type: Number, default: null },
         },
       },
       timestamps: {
