@@ -28,6 +28,12 @@ let config = {
     transaction: process.env.DB_URL_TRANSACTION,
     properties: process.env.DB_URL_PROPERTIES,
   },
+  s3:{
+    region: process?.env?.AWS_REGION,
+    accessKey: process?.env?.AWS_ACCESS_KEY,
+    secretKey: process?.env?.AWS_SECRET_KEY,
+    bucketName: process?.env?.AWS_BUCKET_NAME,
+  },
   twilio: {
     accountSid: process.env.TWILIO_ACCOUNT_SID,
     authToken: process.env.TWILIO_ACCOUNT_TOKEN,

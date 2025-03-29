@@ -12,6 +12,7 @@ let app = express();
 // app.use("/api/payout/admin/merchant",verifyAdmin, require('./MerchantRouter'))
 app.use("/api/oneapp/admin/zone", require('./ZoneRouter'));
 app.use("/api/oneapp/admin/order", require('./OrderRouter'));
+app.use("/api/oneapp/admin/analyze", require('./AnalyzeRouter'));
 
 
 // app.use('/api/payout/export-acl-route-group', require('./MerchantRouter'));

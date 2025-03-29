@@ -147,6 +147,19 @@ function Utils() {
     return R * c; // Distance in kilometers
   };
 
+  this.calculateDistanceOne = function (lat1, lon1, lat2, lon2) {
+    const R = 6371; // Radius of the Earth in km
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in km
+  };
+
   this.isPointInPolygon = function (point, polygon) {
     let [x, y] = point;
     let inside = false;
@@ -163,6 +176,23 @@ function Utils() {
 
     return inside;
   };
+
+  this.checkTransPin = async (req, callback)=> {
+    let merchant = await this.getUser(req);
+    let pin = req.body?.mPin;
+    if(!pin){
+      callback(false, "Please enter valid Transaction pin")
+    }else if(!merchant?.transPin){
+      callback(false, "you not have Transaction pin, Please create your transaction Pin")
+    }else{
+      let dd = await this.checkPassword(pin.toString(), merchant?.transPin);
+      if(!dd){
+        callback(false, "Invalid Pin")
+      }else{
+        callback(true, '')
+      }
+    }   
+  }
 
   this.convertSecondsToMinutes = function (seconds) {
     let minutes = Math.floor(seconds / 60); // Get whole minutes

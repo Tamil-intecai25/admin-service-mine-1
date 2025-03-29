@@ -82,14 +82,14 @@ function Controller() {
       // }
 
       // Calculate total amount from items (optional validation)
-      let calculatedTotal = items.reduce(
-        (sum, item) => sum + item.finalDishPrice * item.quantity,
-        0
-      );
-      // console.log("calculatedTotal",calculatedTotal,"calculatedTotal");return;
-      if (calculatedTotal !== totalAmount) {
-        return Responder.sendFailure(res, "Total amount mismatch", 400);
-      }
+      // let calculatedTotal = items.reduce(
+      //   (sum, item) => sum + item.finalDishPrice * item.quantity,
+      //   0
+      // );
+      // // console.log("calculatedTotal",calculatedTotal,"calculatedTotal");return;
+      // if (calculatedTotal !== totalAmount) {
+      //   return Responder.sendFailure(res, "Total amount mismatch", 400);
+      // }
 
       // Create an order
       let order = new OrderModel({
