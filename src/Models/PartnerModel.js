@@ -20,6 +20,11 @@ let partnerSchema = new AdminConnection.Schema(
       streetName: { type: String },
       landmark: { type: String },
     },
+    status: {
+      type: String,
+      enum: ["active", "inactivce"],
+      default: "inactive",
+    },
     audit: {
       createdBy: {
         id: { type: String },

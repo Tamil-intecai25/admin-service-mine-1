@@ -82,14 +82,14 @@ function Controller() {
       // }
 
       // Calculate total amount from items (optional validation)
-      let calculatedTotal = items.reduce(
-        (sum, item) => sum + item.finalDishPrice * item.quantity,
-        0
-      );
-      // console.log("calculatedTotal",calculatedTotal,"calculatedTotal");return;
-      if (calculatedTotal !== totalAmount) {
-        return Responder.sendFailure(res, "Total amount mismatch", 400);
-      }
+      // let calculatedTotal = items.reduce(
+      //   (sum, item) => sum + item.finalDishPrice * item.quantity,
+      //   0
+      // );
+      // // console.log("calculatedTotal",calculatedTotal,"calculatedTotal");return;
+      // if (calculatedTotal !== totalAmount) {
+      //   return Responder.sendFailure(res, "Total amount mismatch", 400);
+      // }
 
       // Create an order
       let order = new OrderModel({
@@ -136,6 +136,7 @@ function Controller() {
           orderId: order.orderId,
           sellerId: order.seller.sellerId,
           deliveryDetails: order.deliveryPartner,
+          items: order.items,
           mapsData: order.mapsData,
           message: "New order created to you",
         });
@@ -160,11 +161,10 @@ function Controller() {
     try {
       const { sellerId } = req.query;
 
-      console.log(req);
       if (!sellerId) {
         return Responder.sendFailure(res, "Missing required fields", 400);
       }
-      let order = await OrderModel.findOne({ "seller.sellerId": sellerId });
+      let order = await OrderModel.find({ "seller.sellerId": sellerId });
 
       if (!sellerId) {
         return Responder.sendFailure(res, "Order not found", 404);
@@ -180,6 +180,8 @@ function Controller() {
   this.acceptOrderForSeller = async function (req, res) {
     try {
       const { orderId, sellerId, preparingTime } = req.query;
+      console.log("ggggggggggggggg", orderId, sellerId, preparingTime);
+
       const { io, deliveryPartners, users } = req;
       if (!orderId || !sellerId) {
         return Responder.sendFailure(res, "Missing required fields", 400);
@@ -295,7 +297,7 @@ function Controller() {
 
       const userSocketId = users.get(order.user.userId);
       if (userSocketId) {
-        io.to(userSocketId).emit("orderPlaced", {
+        io.to(userSocketId).emit("orderAccepted", {
           orderId: order.orderId,
           sellerId: order.seller.sellerId,
           deliveryDetails: order.deliveryPartner,
@@ -457,7 +459,7 @@ function Controller() {
       return Responder.sendFailure(res, "Something went wrong", 500);
     }
   };
-  // New method to handle pickup
+
   this.pickupOrderForPartner = async function (req, res) {
     try {
       const { orderId, partnerId } = req.query;
@@ -504,6 +506,7 @@ function Controller() {
     }
   };
   this.statusUpdate = async function (req, res) {
+    console.log(req.query, "------------------->");
     try {
       const { orderId, userId, status } = req.query;
       const { io, sellers, deliveryPartners, users } = req;
@@ -516,7 +519,13 @@ function Controller() {
       let order;
       const validStatuses = {
         seller: ["ready"],
-        partner: ["reached", "picked_up", "delivered"],
+        partner: [
+          "reached_pickup_loaction",
+          "picked_up",
+          "delivered",
+          "reached_user_loaction",
+          "completed",
+        ],
         user: ["cancelled"],
       };
 
@@ -594,8 +603,9 @@ function Controller() {
           }
 
           switch (status) {
-            case "reached":
+            case "reached_pickup_loaction":
               order.deliveryPartner.timestamps.reachedPickupAt = new Date();
+              order.status = "reached_pickup_loaction";
               await order.save();
               notifyAllParties(
                 order,
@@ -609,11 +619,25 @@ function Controller() {
               await order.save();
               notifyAllParties(order, "Order has been picked up");
               break;
+            case "reached_user_loaction":
+              order.status = "reached_user_loaction";
+              await order.save();
+              notifyAllParties(
+                order,
+                "Delivery partner has  reached the user loaction"
+              );
+              break;
             case "delivered":
               order.deliveryPartner.timestamps.deliveredAt = new Date();
               order.status = "delivered";
               await order.save();
               notifyAllParties(order, "Order has been delivered");
+              break;
+            case "completed":
+              order.deliveryPartner.timestamps.deliveredAt = new Date();
+              order.status = "completed";
+              await order.save();
+              notifyAllParties(order, "Order has been completed");
               break;
           }
           break;

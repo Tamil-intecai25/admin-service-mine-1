@@ -708,12 +708,8 @@ function Controller() {
 
   this.findZonesContainingUser = async function (res, req) {
     try {
-      // console.log(req.query);return;
-
       let userLat = parseFloat(req.query.lat);
       let userLong = parseFloat(req.query.long);
-
-      // console.log(typeof userLong);return;
 
       if (!userLat || !userLong) {
         return Responder.sendFailure(
@@ -732,8 +728,7 @@ function Controller() {
           coord.lat,
           coord.lng,
         ]);
-        // console.log("polygon",polygon,"polygon");return;
-        // console.log(Utils.isPointInPolygon([userLat, userLong], polygon),"IAMM");return;
+
         if (Utils.isPointInPolygon([userLat, userLong], polygon)) {
           matchedZoneId = area.zoneId;
           break;
@@ -748,8 +743,8 @@ function Controller() {
         );
       }
 
+      // Step 2: Find sellers in the zone
       let zoneAreas = await AreaModel.find({ zoneId: matchedZoneId });
-
       let sellersInZone = [];
 
       for (const zoneArea of zoneAreas) {
@@ -768,15 +763,38 @@ function Controller() {
           let sellerLong = seller.location.branch.long;
 
           if (Utils.isPointInPolygon([sellerLat, sellerLong], areaPolygon)) {
-            sellersInZone.push(seller);
+            // Calculate distance between user and seller
+            let distanceToSeller = Utils.calculateDistanceOne(
+              userLat,
+              userLong,
+              sellerLat,
+              sellerLong
+            );
+
+            // Estimate First Mile (Pickup Time)
+            let preparationTime = seller.avgPreparationTime || 10; // Default 10 mins
+            let riderPickupTime = distanceToSeller * 2; // Assuming 2 min per km
+            let firstMileTime = preparationTime + riderPickupTime;
+
+            // Estimate Second Mile (Delivery Time)
+            let deliveryTime = Math.min(distanceToSeller * 4, 16); // Max 16 mins
+            // console.log("seller",seller,"seller");return;
+            sellersInZone.push({
+              seller,
+              firstMileTime, // Pickup + Preparation
+              secondMileTime: deliveryTime, // Delivery Time
+            });
           }
         });
       }
 
+      // Sort sellers by first mile time (fastest pickup first)
+      sellersInZone.sort((a, b) => a.firstMileTime - b.firstMileTime);
+
       if (sellersInZone.length > 0) {
         return Responder.sendSuccess(
           res,
-          "Sellers found inside the zone",
+          "Nearest Sellers",
           200,
           sellersInZone
         );

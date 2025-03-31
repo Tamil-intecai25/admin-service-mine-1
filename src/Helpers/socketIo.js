@@ -87,11 +87,11 @@ const initializeSocket = (port, apiBaseUrl) => {
     });
 
     // Register seller
-    socket.on("registerSeller", async (sellerId) => {
-      console.log(sellerId, "---------------->sell");
+    socket.on("registerSeller", async (seller) => {
+      console.log(seller, "---------------->sell");
       try {
-        sellers.set(sellerId.sellerId, socket.id);
-        console.log(`Seller ${sellerId} connected with socket ID ${socket.id}`);
+        sellers.set(seller.sellerId, socket.id);
+        console.log(`Seller ${seller} connected with socket ID ${socket.id}`);
         // await axios.post(`${apiBaseUrl}/api/seller/register`, {
         //   sellerId,
         //   socketId: socket.id,
@@ -135,11 +135,12 @@ const initializeSocket = (port, apiBaseUrl) => {
 
     // Hand
     // Register delivery partner
-    socket.on("registerDeliveryPartner", async (partnerId) => {
+    socket.on("registerDeliveryPartner", async (partner) => {
+      console.log(partner, "--------------------?");
       try {
-        deliveryPartners.set(partnerId.partnerId, socket.id);
+        deliveryPartners.set(partner.partnerId, socket.id);
         console.log(
-          `Delivery Partner ${partnerId} connected with socket ID ${socket.id}`
+          `Delivery Partner ${partner.partnerId} connected with socket ID ${socket.id}`
         );
         // await axios.post(`${apiBaseUrl}/api/delivery-partner/register`, {
         //   partnerId,
