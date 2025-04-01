@@ -25,6 +25,17 @@ let partnerSchema = new AdminConnection.Schema(
       enum: ["active", "inactivce"],
       default: "inactive",
     },
+    workStatus: {
+      type: String,
+      enum: [
+        "waiting_for_order",
+        "waiting_for_pickup",
+        "drive_to_seller",
+        "drive_to_user",
+        "assigned",
+      ],
+      default: "waiting_for_order",
+    },
     audit: {
       createdBy: {
         id: { type: String },

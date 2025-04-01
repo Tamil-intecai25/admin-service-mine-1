@@ -14,8 +14,8 @@ let orderSchema = new AdminConnection.Schema(
         "ready",
         "processing",
         "completed",
-        "reached_user_loaction",
-        "reached_pickup_loaction",
+        "reached_user_location",
+        "reached_pickup_location",
         "picked_up",
         "out_for_delivery",
         "delivered",
@@ -53,91 +53,106 @@ let orderSchema = new AdminConnection.Schema(
     },
 
     // *************Seller Details**************
-    seller: {
-      sellerId: { type: String, required: true },
-      name: { type: String, required: true },
-      contact: { type: String, required: true },
-      address: { type: String, default: null },
-      location: {
-        lat: { type: Number, required: true },
-        long: { type: Number, required: true },
+    sellers: [
+      {
+        sellerId: { type: String, required: true },
+        name: { type: String, required: true },
+        contact: { type: String, required: true },
+        address: { type: String, default: null },
+        location: {
+          lat: { type: Number, required: true },
+          long: { type: Number, required: true },
+        },
+        timestamps: {
+          acceptedAt: { type: Date, default: null },
+          preparingStartAt: { type: Date, default: null },
+          readyAt: { type: Date, default: null },
+          pickedUpAt: { type: Date, default: null },
+        },
+        preparingTime: {
+          text: { type: String, default: null },
+          value: { type: String, default: null },
+        },
+        items: [
+          {
+            categoryId: { type: String, required: true },
+            subCategoryId: { type: String, required: true },
+            productName: { type: String, required: true },
+            quantity: { type: Number, required: true },
+            dishPrice: { type: Number, required: true },
+            gst: { type: Number, required: true },
+            packagePrice: { type: Number, required: true },
+            finalDishPrice: { type: Number, required: true },
+          },
+        ],
+        subTotal: { type: Number, required: true }, // Subtotal for this seller's items
       },
-      timestamps: {
-        acceptedAt: { type: Date, default: null },
-        preparingStartAt: { type: Date, default: null },
-        readyAt: { type: Date, default: null },
-        pickedUpAt: { type: Date, default: null },
-      },
-      preparingTime: {
-        text: { type: String, default: null },
-        value: { type: String, default: null },
-      },
-    },
+    ],
 
     // *****************Delivery Partner Details**************
-    deliveryPartner: {
-      partnerId: { type: String, default: null },
-      name: { type: String, default: null },
-      contact: { type: String, default: null },
-      tracking: {
-        currentLocation: {
-          lat: { type: Number, default: null },
-          long: { type: Number, default: null },
+    deliveryPartners: [
+      {
+        partnerId: { type: String, default: null },
+        name: { type: String, default: null },
+        contact: { type: String, default: null },
+        assignedSellerIds: [{ type: String }], // Array of sellerIds this partner is responsible for
+        tracking: {
+          currentLocation: {
+            lat: { type: Number, default: null },
+            long: { type: Number, default: null },
+          },
+          estimatedDeliveryTime: {
+            text: { type: String, default: null },
+            value: { type: Number, default: null },
+            date: { type: Date, default: null },
+          },
+          totalDistance: {
+            text: { type: String, default: null },
+            value: { type: Number, default: null },
+          },
         },
-        estimatedDeliveryTime: {
-          text: { type: String, default: null },
-          value: { type: Number, default: null },
-          date: { type: Date, default: null },
-        },
-        totalDistance: {
-          text: { type: String, default: null },
-          value: { type: Number, default: null },
+        timestamps: {
+          acceptedAt: { type: Date, default: null },
+          reachedPickupAt: { type: Date, default: null },
+          pickedUpAt: { type: Date, default: null },
+          deliveredAt: { type: Date, default: null },
         },
       },
-      timestamps: {
-        acceptedAt: { type: Date, default: null },
-        reachedPickupAt: { type: Date, default: null },
-        pickedUpAt: { type: Date, default: null },
-        deliveredAt: { type: Date, default: null },
-      },
-    },
+    ],
 
     // *********Google Maps Distance & Duration Data********
     mapsData: {
-      deliveryPartnerToSeller: {
-        distance: {
-          text: { type: String, default: null },
-          value: { type: String, default: null },
+      deliveryPartnersToSellers: [
+        {
+          deliveryPartnerId: { type: String, default: null },
+          sellerId: { type: String, required: true },
+          distance: {
+            text: { type: String, default: null },
+            value: { type: Number, default: null },
+          },
+          duration: {
+            text: { type: String, default: null },
+            value: { type: Number, default: null },
+          },
         },
-        duration: {
-          text: { type: String, default: null },
-          value: { type: String, default: null },
+      ],
+      sellersToUser: [
+        {
+          sellerId: { type: String, required: true },
+          distance: {
+            text: { type: String, default: null },
+            value: { type: Number, default: null },
+          },
+          duration: {
+            text: { type: String, default: null },
+            value: { type: Number, default: null },
+          },
         },
-      },
-      sellerToUser: {
-        distance: {
-          text: { type: String, default: null },
-          value: { type: String, default: null },
-        },
-        duration: {
-          text: { type: String, default: null },
-          value: { type: String, default: null },
-        },
-      },
+      ],
     },
+
     // *************Order Items*****************
-    items: [
-      {
-        categoryId: { type: String, required: true },
-        subCategoryId: { type: String, required: true },
-        productName: { type: String, required: true },
-        quantity: { type: Number, required: true },
-        dishPrice: { type: Number, required: true },
-        gst: { type: Number, required: true },
-        packagePrice: { type: Number, required: true },
-        finalDishPrice: { type: Number, required: true },
-      },
-    ],
+    // Removed the top-level items array since items are now nested under sellers
 
     audit: {
       createdBy: {

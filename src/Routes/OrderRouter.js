@@ -9,6 +9,10 @@ app.post("/place-order", verifyToken.verifyToken, function (req, res) {
   OrderController.placeOrder(req, res);
 });
 
+app.get("/user/get-orders", function (req, res) {
+  OrderController.getOrdersByUserId(req, res);
+});
+
 //*****for seller*******
 
 app.get("/seller/get-orders", function (req, res) {

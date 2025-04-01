@@ -232,6 +232,8 @@ function Utils() {
         let partners = await PartnerModel.find({
           "location.lat": { $exists: true },
           "location.long": { $exists: true },
+          workStatus: "waiting_for_order",
+          status: "active",
         });
 
         partners.forEach((partner) => {
@@ -244,11 +246,7 @@ function Utils() {
       }
 
       if (partnersInZone.length === 0) {
-        return Responder.sendFailure(
-          res,
-          "No delivery partners found in this zone",
-          404
-        );
+        return undefined;
       }
 
       // Step 4: Find the nearest delivery partner using Google Distance Matrix API
