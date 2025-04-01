@@ -45,6 +45,8 @@
 // };
 // src/Helpers/socketIo.js
 // src/Helpers/socketIo.js
+const OrderModel = require("../Models/OrderModel");
+const PartnerModel = require("../Models/PartnerModel");
 const { Server } = require("socket.io");
 const axios = require("axios");
 
@@ -110,7 +112,44 @@ const initializeSocket = (port, apiBaseUrl) => {
       }
     });
 
-    socket.on("partnerLocationUpdate", (data) => {
+    socket.on("partnerLocationUpdate", async (data) => {
+      try {
+        // console.log("data", data, "data");
+        // await OrderModel.updateOne(
+        //   { orderId: data.orderId },
+        //   {
+        //     $set: {
+        //       "deliveryPartners.tracking.currentLocation.lat":
+        //         data.location.lat,
+        //       "deliveryPartners.tracking.currentLocation.long":
+        //         data.location.lng,
+        //     },
+        //   }
+        // );
+        let order = await OrderModel.findOne({ orderId: data.orderId });
+        order.deliveryPartners.tracking.currentLocation.lat = data.location.lat;
+        order.markModified("deliveryPartners.tracking.currentLocation.lat");
+        order.deliveryPartners.tracking.currentLocation.long =
+          data.location.lng;
+        order.markModified("deliveryPartners.tracking.currentLocation.long");
+        await order.save();
+        let partner = await PartnerModel.findOne({ partnerId: data.partnerId });
+        partner.location.lat = data.location.lat;
+        partner.markModified("location.lat");
+        partner.location.long = data.location.lng;
+        partner.markModified("location.long");
+        await partner.save();
+        // let a = await PartnerModel.updateOne(
+        //   { partnerId: data.partnerId },
+        //   {
+        //     $set: {
+        //       "deliveryPartners.location.lat": data.location.lat,
+        //       "deliveryPartners.location.long": data.location.lng,
+        //     },
+        //   }
+        // );
+        console.log(a, "------------->aaa");
+      } catch (error) {}
       //***********type*************/
       // {
       //   partnerId: string,

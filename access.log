@@ -1624,3 +1624,5 @@
 ::1 - - [01/Apr/2025:10:26:47 +0000] "GET /api/oneapp/admin/order/user/get-orders?userId=user_SDm6v68JjS HTTP/1.1" 404 - "-" "PostmanRuntime/7.39.1"
 ::1 - - [01/Apr/2025:10:27:04 +0000] "GET /api/oneapp/admin/order/user/get-orders?userId=user_SDm6v68JjS HTTP/1.1" 200 - "-" "PostmanRuntime/7.39.1"
 ::ffff:192.168.0.107 - - [01/Apr/2025:10:28:32 +0000] "GET /api/oneapp/admin/order/user/get-orders?userId=user_SDm6v68JjS HTTP/1.1" 200 - "-" "PostmanRuntime/7.43.3"
+::ffff:192.168.0.145 - - [01/Apr/2025:10:54:29 +0000] "OPTIONS /api/oneapp/admin/order/partner/pickup-order?orderId=order_PARbZklBUC&partnerId=partner_6qd7jMBhUm HTTP/1.1" 204 0 "http://localhost:5173/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+::ffff:192.168.0.145 - - [01/Apr/2025:10:54:29 +0000] "POST /api/oneapp/admin/order/partner/pickup-order?orderId=order_PARbZklBUC&partnerId=partner_6qd7jMBhUm HTTP/1.1" 404 - "http://localhost:5173/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
