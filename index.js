@@ -24,10 +24,11 @@ app.use(morgan("combined", { stream: accessLogStream }));
 const server = http.createServer(app);
 
 const { io, sellers, users, deliveryPartners } = initializeSocket(
-  7008,
-  "http://localhost:7007"
+  process.env.SOCKET_PORT,
+  `${process.env.DOMAIN}`
 );
 
+console.log(process.env.SOCKET_PORT);
 module.exports = { io, sellers, deliveryPartners };
 
 app.use((req, res, next) => {
