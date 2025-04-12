@@ -55,7 +55,9 @@ const initializeSocket = (port, apiBaseUrl) => {
     cors: {
       origin: "*",
       methods: ["GET", "POST"],
+      credentials: true,
     },
+    path: "/socket.io/",
   });
   console.log(io, "------------>socket");
 
