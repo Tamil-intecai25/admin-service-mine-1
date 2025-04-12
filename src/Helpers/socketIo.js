@@ -57,13 +57,32 @@ const initializeSocket = (port, apiBaseUrl) => {
       methods: ["GET", "POST"],
     },
   });
+  console.log(io, "------------>socket");
 
   const sellers = new Map();
   const users = new Map();
   const deliveryPartners = new Map(); // Add Map for delivery partners
 
   io.on("connection", (socket) => {
+    console.log(socket, "------------->");
+
     console.log("A user connected:", socket.id);
+    socket.on("connect_error", (err) => {
+      console.error(` Connection error (socket ${socket.id}):`, err.message);
+    });
+
+    socket.on("error", (err) => {
+      console.error(` Socket error (socket ${socket.id}):`, err.message);
+    });
+
+    io.engine.on("connection_error", (err) => {
+      console.error(
+        " Engine connection error:",
+        err.req?.url,
+        err.code,
+        err.message
+      );
+    });
 
     // ***************User Register**************
     socket.on("registerUser", async (userId) => {
