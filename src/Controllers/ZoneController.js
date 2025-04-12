@@ -210,14 +210,12 @@ function Controller() {
 
   this.allAreasUpdate = async function (req, res) {
     // try {
-    let { zones } = req.body; // Extracting 'zones' from request body
+    let { zones } = req.body;
     if (!Array.isArray(zones) || zones.length === 0) {
       return Responder.sendFailure(res, "Invalid request data", 400);
     }
-
     let operations = zones.map(async (areaData) => {
       let { areaId, zoneId, zoneArea, polygoneLatelong } = areaData;
-
       if (!areaId) {
         let newAreaId = "area_" + Utils.getNanoId();
         let newArea = new AreaModel({
@@ -226,7 +224,6 @@ function Controller() {
           zoneArea: zoneArea ?? "",
           polygoneLatelong: polygoneLatelong || [],
         });
-
         return await newArea.save();
       } else {
         let existingArea = await AreaModel.findOne({ areaId: areaId });
@@ -423,47 +420,55 @@ function Controller() {
   // };
 
   this.sendOtp = async function (req, res, type) {
-    try {
-      const { phone } = req.body;
+    // try {
+    const { phone } = req.body;
 
-      let user;
-      if (type === "seller") {
-        user = await SellerModel.findOne({ phone });
-      } else {
-        user = await OneAppUserModel.findOne({ phone });
-      }
+    console.log(phone);
 
-      // If user doesn't exist, create a new one
-      if (!user) {
-        const userId = "user_" + Utils.getNanoId();
-        let newUserData = { userId, phone };
-
-        if (type === "seller") {
-          newUserData.sellerId = "seller_" + Utils.getNanoId(); // Add sellerId for sellers
-          user = new SellerModel(newUserData);
-        } else {
-          user = new OneAppUserModel(newUserData);
-        }
-
-        await user.save();
-      }
-
-      // Generate OTP and store it
-      const otp = "1234"; // Replace with actual OTP logic
-      // otpStore.set(phone, { otp, verified: false });
-      otpStore.set(phone, {
-        otp,
-        verified: false,
-        expiresAt: Date.now() + otp_expiry_time,
-      });
-
-      console.log(`OTP for ${phone}: ${otp}`); // Log OTP for testing
-
-      return Responder.sendSuccess(res, "OTP sent successfully", 200);
-    } catch (error) {
-      console.error("Error sending OTP:", error);
-      return Responder.sendFailure(res, "Something went wrong", 500);
+    let user;
+    if (type === "seller") {
+      user = await SellerModel.findOne({ phone });
+    } else if (type === "partner") {
+      user = await SellerModel.findOne({ phone });
+    } else {
+      user = await OneAppUserModel.findOne({ phone });
     }
+
+    // If user doesn't exist, create a new one
+    if (!user) {
+      const userId = "user_" + Utils.getNanoId();
+      let newUserData = { userId, phone };
+
+      if (type === "seller") {
+        newUserData.sellerId = "seller_" + Utils.getNanoId(); // Add sellerId for sellers
+        user = new SellerModel(newUserData);
+      } else if (type === "partner") {
+        newUserData.partnerId = "partner_" + Utils.getNanoId(); // Add sellerId for sellers
+        user = new PartnerModel(newUserData);
+      } else {
+        user = new OneAppUserModel(newUserData);
+      }
+      // console.log("user", user, "user");
+      // return;
+      await user.save();
+    }
+
+    // Generate OTP and store it
+    const otp = "1234"; // Replace with actual OTP logic
+    // otpStore.set(phone, { otp, verified: false });
+    otpStore.set(phone, {
+      otp,
+      verified: false,
+      expiresAt: Date.now() + otp_expiry_time,
+    });
+
+    console.log(`OTP for ${phone}: ${otp}`);
+
+    return Responder.sendSuccess(res, "OTP sent successfully", 200);
+    // } catch (error) {
+    //   console.error("Error sending OTP:", error);
+    //   return Responder.sendFailure(res, "Something went wrong", 500);
+    // }
   };
 
   this.verifyOtp = async function (req, res, type) {
@@ -488,45 +493,48 @@ function Controller() {
       // Mark OTP as verified
       otpStore.set(phone, { ...storedOtpData, verified: true });
 
+      // Determine the model based on type
+      // console.log("type", type, "type");
+      // return;
+      let Model;
+      if (type === "seller") Model = SellerModel;
+      else if (type === "partner") Model = PartnerModel;
+      else if (type === "oneappuser") Model = OneAppUserModel;
+      else return Responder.sendFailure(res, "Invalid user type", 400);
+
       // Find or create user
-      let user = await (type === "seller"
-        ? SellerModel
-        : OneAppUserModel
-      ).findOne({ phone });
+      let user = await Model.findOne({ phone });
 
       if (!user) {
-        let userId = "user_" + Utils.getNanoId();
-        user = new (type === "seller" ? SellerModel : OneAppUserModel)({
-          userId,
-          phone,
-        });
+        let userId =
+          type === "partner"
+            ? "partner_" + Utils.getNanoId()
+            : "user_" + Utils.getNanoId();
+        let newUserData = { userId, phone };
+
+        if (type === "partner") {
+          newUserData.partnerId = userId;
+          newUserData.areaId = "defaultAreaId"; // Adjust as needed
+          newUserData.name = "New Partner"; // Adjust as needed
+        }
+
+        user = new Model(newUserData);
         await user.save();
       }
+
       // Generate temporary JWT Token (valid only for updating user details)
-      // console.log(type);return;
-      if (type === "seller") {
-        token = jwt.sign(
-          {
-            sellerId: user.sellerId,
-            phone: user.phone,
-            location: user.location,
-            step: "otp_verified",
-          },
-          process.env.JWT_SECRET,
-          { expiresIn: "7d" } // Short-lived token for security
-        );
-      } else {
-        token = jwt.sign(
-          {
-            userId: user.userId,
-            phone: user.phone,
-            location: user.location,
-            step: "otp_verified",
-          },
-          process.env.JWT_SECRET,
-          { expiresIn: "7d" } // Short-lived token for security
-        );
-      }
+      let tokenPayload = {
+        phone: user.phone,
+        location: user.location,
+        step: "otp_verified",
+      };
+      if (type === "seller") tokenPayload.sellerId = user.sellerId;
+      else if (type === "partner") tokenPayload.partnerId = user.partnerId;
+      else if (type === "oneappuser") tokenPayload.userId = user.userId;
+
+      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+        expiresIn: "7d",
+      });
 
       // Clear OTP from storage
       otpStore.delete(phone);

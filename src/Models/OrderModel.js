@@ -4,7 +4,7 @@ let orderSchema = new AdminConnection.Schema(
   {
     // ********Common Order Details************
     orderId: { type: String, required: true, unique: true },
-    totalAmount: { type: Number, required: true },
+    totalAmount: { type: String, required: true },
     status: {
       type: String,
       enum: [
@@ -85,17 +85,18 @@ let orderSchema = new AdminConnection.Schema(
             finalDishPrice: { type: Number, required: true },
           },
         ],
-        subTotal: { type: Number, required: true }, // Subtotal for this seller's items
+        subTotal: { type: Number, required: true },
       },
     ],
-
     // *****************Delivery Partner Details**************
     deliveryPartners: [
       {
         partnerId: { type: String, default: null },
+        routes: { type: Array, default: [] },
         name: { type: String, default: null },
         contact: { type: String, default: null },
-        assignedSellerIds: [{ type: String }], // Array of sellerIds this partner is responsible for
+        ordersCount: { type: Number, default: 0 },
+        assignedSellerIds: [{ type: String }],
         tracking: {
           currentLocation: {
             lat: { type: Number, default: null },

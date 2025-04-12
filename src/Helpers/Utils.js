@@ -2,6 +2,7 @@ let request = require("request");
 const { customAlphabet } = require("nanoid");
 let Config = require("../Configs/Config");
 let ejs = require("ejs");
+const axios = require("axios");
 let emailClient = require("elasticemail");
 let client = emailClient.createClient({
   username: "info@ippopay.com",
@@ -22,6 +23,7 @@ let Responder = require("../Helpers/Responder");
 const AreaModel = require("../Models/AreaModel");
 const SellerModel = require("../Models/SellerModel");
 const PartnerModel = require("../Models/PartnerModel");
+const OrderModel = require("../Models/OrderModel");
 let { ResMessage } = require("../Helpers/ResMessage");
 let moment = require("moment");
 let bcrypt = require("bcrypt");
@@ -44,6 +46,55 @@ function Utils() {
   this.sendOtp = async (phoneNumber) => {
     const user = await Admin.auth().createUser({ phoneNumber });
     console.log("OTP sent to:", phoneNumber);
+  };
+
+  this.getBestPartner = (commonPartners, options = { onlyAvailable: true }) => {
+    const availablePartners = commonPartners.filter((entry) => {
+      if (!entry.partner || entry.partner.hasDeleted) return false;
+      if (
+        options.onlyAvailable &&
+        entry.partner.workStatus !== "waiting_for_order"
+      )
+        return false;
+      return true;
+    });
+
+    if (availablePartners.length === 0) return null;
+
+    // Normalize distance, wait time, and order count
+    const distances = availablePartners.map((p) => p.totalRouteDistance);
+    const waitTimes = availablePartners.map((p) => p.partner.waitingTime);
+    const orderCounts = availablePartners.map(
+      (p) => p.partner.ordersCount || 0
+    );
+
+    const minDist = Math.min(...distances);
+    const maxDist = Math.max(...distances);
+    const minWait = Math.min(...waitTimes);
+    const maxWait = Math.max(...waitTimes);
+    const minOrder = Math.min(...orderCounts);
+    const maxOrder = Math.max(...orderCounts);
+
+    const scoredPartners = availablePartners.map((entry) => {
+      const normalizedDistance =
+        1 - (entry.totalRouteDistance - minDist) / (maxDist - minDist || 1);
+      const normalizedWait =
+        (entry.partner.waitingTime - minWait) / (maxWait - minWait || 1);
+      const normalizedOrder =
+        1 - (entry.partner.orderCount - minOrder) / (maxOrder - minOrder || 1);
+
+      // Adjust weights as needed
+      const score =
+        0.5 * normalizedDistance + 0.3 * normalizedWait + 0.2 * normalizedOrder;
+
+      return {
+        ...entry,
+        score,
+      };
+    });
+
+    scoredPartners.sort((a, b) => b.score - a.score);
+    return scoredPartners[0];
   };
 
   this.findZonesContainingUser = async function (res, req) {
@@ -164,6 +215,7 @@ function Utils() {
   };
 
   this.isPointInPolygon = function (point, polygon) {
+    console.log(point, "][[[[[[[[[[[[[[[[[[[");
     let [x, y] = point;
     let inside = false;
 
@@ -188,130 +240,419 @@ function Utils() {
     }`;
   };
 
-  const axios = require("axios");
+  const formatDistance = (meters) => {
+    return meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${meters} m`;
+  };
 
-  this.findZonesContainingDeliveryPartner = async function (res, req) {
+  const formatDuration = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    const parts = [];
+    if (h > 0) parts.push(`${h} hr${h > 1 ? "s" : ""}`);
+    if (m > 0) parts.push(`${m} min${m > 1 ? "s" : ""}`);
+    if (h === 0 && m === 0 && s > 0) parts.push(`${s} sec${s > 1 ? "s" : ""}`);
+
+    return parts.join(" ");
+  };
+
+  this.findNearbyPartnersForSellers = async function (res, req) {
     try {
-      let sellerLat = req.body.lat;
-      let sellerLong = req.body.long;
+      const sellers = req.body.sellers;
+      const drop = req.body.dropLocation;
 
-      if (!sellerLat || !sellerLong) {
+      if (!Array.isArray(sellers) || sellers.length === 0) {
         return Responder.sendFailure(
           res,
-          "Latitude and Longitude are required",
+          "At least one seller location is required",
           400
         );
       }
 
-      // Step 1: Find the Area ID where the seller's location falls
-      let allAreas = await AreaModel.find();
-      let matchedArea = allAreas.find((area) =>
-        this.isPointInPolygon(
-          [sellerLat, sellerLong],
-          area.polygoneLatelong.map((coord) => [coord.lat, coord.lng])
-        )
-      );
-
-      if (!matchedArea) {
-        return undefined;
+      if (!drop || !drop.lat || !drop.long) {
+        return Responder.sendFailure(res, "Drop location is required", 400);
       }
 
-      let zoneId = matchedArea.zoneId;
+      const MAX_DISTANCE_METERS = 5000;
+      const MAX_TOTAL_ROUTE_METERS = 7000;
+      const MAX_TOTAL_ROUTE_DURATION_SECONDS = 60 * 60;
+      const googleMapsAPIKey = "AIzaSyBdgzn86CxjJDfA5PHD6Wq07a6Dlyh7F0s";
 
-      // Step 2: Get all areas mapped to the same Zone ID
-      let mappedAreas = await AreaModel.find({ zoneId });
+      const allAreas = await AreaModel.find();
 
-      // Step 3: Get all partners in these mapped areas
-      let partnersInZone = [];
-      for (const area of mappedAreas) {
-        let areaPolygon = area.polygoneLatelong.map((coord) => [
-          coord.lat,
-          coord.lng,
-        ]);
-
-        let partners = await PartnerModel.find({
-          "location.lat": { $exists: true },
-          "location.long": { $exists: true },
-          workStatus: "waiting_for_order",
-          status: "active",
-        });
-
-        partners.forEach((partner) => {
-          let partnerLat = partner.location.lat;
-          let partnerLong = partner.location.long;
-          if (this.isPointInPolygon([partnerLat, partnerLong], areaPolygon)) {
-            partnersInZone.push(partner);
-          }
-        });
-      }
-
-      if (partnersInZone.length === 0) {
-        return undefined;
-      }
-
-      // Step 4: Find the nearest delivery partner using Google Distance Matrix API
-      let destinations = partnersInZone
-        .map((partner) => `${partner.location.lat},${partner.location.long}`)
-        .join("|");
-
-      let googleMapsAPIKey = "AIzaSyBdgzn86CxjJDfA5PHD6Wq07a6Dlyh7F0s";
-
-      let distanceMatrixUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${sellerLat},${sellerLong}&destinations=${destinations}&key=${googleMapsAPIKey}`;
-
-      let distanceResponse = await axios.get(distanceMatrixUrl);
-
-      let distances = distanceResponse.data.rows[0].elements;
-
-      console.log(distances, "...................>distances");
-
-      let nearestPartner = null;
-      let minDistance = Infinity;
-
-      partnersInZone.forEach((partner, index) => {
-        let distance = distances[index].distance?.value || Infinity;
-        if (distance < minDistance) {
-          minDistance = distance;
-          console.log(distance, "----------->dis");
-          nearestPartner = { partner, ...distances[index] };
-        }
+      const sellerAreaInfo = sellers.map((seller) => {
+        const area = allAreas.find((area) =>
+          this.isPointInPolygon(
+            [seller.lat, seller.long],
+            area.polygoneLatelong.map((coord) => [coord.lat, coord.lng])
+          )
+        );
+        return area ? { ...seller, area } : null;
       });
 
-      if (!nearestPartner) {
-        return Responder.sendFailure(res, "No nearby partner found", 404);
+      console.log(sellerAreaInfo, "------------>");
+      if (sellerAreaInfo.includes(null)) {
+        return "One or more sellers are outside serviceable areas";
       }
 
-      // // Step 5: Get directions and ETA using Google Directions API
-      // let directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${sellerLat},${sellerLong}&destination=${nearestPartner.location.lat},${nearestPartner.location.long}&key=${googleMapsAPIKey}`;
+      const zoneIds = [...new Set(sellerAreaInfo.map((s) => s.area.zoneId))];
+      const mappedAreas = await AreaModel.find({ zoneId: { $in: zoneIds } });
 
-      // let directionsResponse = await axios.get(directionsUrl);
+      const areaPolygons = mappedAreas.map((area) =>
+        area.polygoneLatelong.map((coord) => [coord.lat, coord.lng])
+      );
 
-      // console.log(directionsResponse, "------------->direction response");
-      // let routeData = directionsResponse.data.routes[0];
+      const partners = await PartnerModel.find({
+        "location.lat": { $exists: true },
+        "location.long": { $exists: true },
+        workStatus: "waiting_for_order",
+        status: true,
+      }).lean();
 
-      // console.log(routeData, "routeData=>>>>>>>>>>>>>>>>>>>>>");
-      // let eta = routeData.legs[0].duration.text; // Estimated time of arrival
-      // let distanceText = routeData.legs[0].distance.text; // Distance in km/miles
-      // let steps = routeData.legs[0].steps.map((step) => step.html_instructions); // Step-by-step directions
+      const partnerIds = partners.map((partner) => partner.partnerId);
 
-      // console.log(
-      //   eta,
-      //   distanceText,
-      //   steps,
-      //   "---------------------------------->all"
-      // );
+      // Get all orders that match any partnerId (broad search first)
+      const allOrders = await OrderModel.find({
+        "deliveryPartners.partnerId": { $in: partnerIds },
+      }).lean();
 
+      // Function to get order count for a specific partner and shift
+      const getOrderCountForShift = (partnerId, startTime, endTime) => {
+        return allOrders.filter((order) =>
+          order.deliveryPartners.some(
+            (dp) =>
+              dp.partnerId === partnerId &&
+              dp.timestamps?.deliveredAt &&
+              new Date(dp.timestamps.deliveredAt) >= new Date(startTime) &&
+              new Date(dp.timestamps.deliveredAt) <= new Date(endTime)
+          )
+        ).length;
+      };
+
+      // Enhance each partner with ordersCount by summing across shifts
+      const partnersWithOrders = partners.map((partner) => {
+        let shifts = [];
+
+        if (Array.isArray(partner.shiftTimings)) {
+          shifts = partner.shiftTimings;
+        } else if (
+          typeof partner.shiftTimings === "object" &&
+          partner.shiftTimings !== null
+        ) {
+          shifts = [partner.shiftTimings];
+        }
+
+        let totalOrders = 0;
+
+        for (const shift of shifts) {
+          const { startTime, endTime } = shift;
+          if (startTime && endTime) {
+            totalOrders += getOrderCountForShift(
+              partner.partnerId,
+              startTime,
+              endTime
+            );
+          }
+        }
+
+        return {
+          ...partner,
+          ordersCount: totalOrders,
+        };
+      });
+
+      const validPartners = partnersWithOrders.filter((p) =>
+        areaPolygons.some((polygon) =>
+          this.isPointInPolygon([p.location.lat, p.location.long], polygon)
+        )
+      );
+      // console.log("validPartners", validPartners, "validPartners");
+      // return;
+      const sellerNearbyMap = sellers.map(() => []);
+      const partnerIdToPartner = Object.fromEntries(
+        validPartners.map((p) => [p._id.toString(), p])
+      );
+
+      // Check proximity using Directions API
+      for (let i = 0; i < sellers.length; i++) {
+        const seller = sellers[i];
+
+        for (let j = 0; j < validPartners.length; j++) {
+          const partner = validPartners[j];
+          // console.log("validPartners", partner, "validPartners");
+          // return;
+          const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${partner.location.lat},${partner.location.long}&destination=${seller.lat},${seller.long}&key=${googleMapsAPIKey}`;
+          // console.log("validPartners", directionsUrl, "validPartners");
+          // return;
+          try {
+            const routeRes = await axios.get(directionsUrl);
+            const leg = routeRes.data.routes[0]?.legs[0];
+
+            const distance = leg?.distance?.value || Infinity;
+            if (distance <= MAX_DISTANCE_METERS) {
+              sellerNearbyMap[i].push(partner._id.toString());
+            }
+          } catch (err) {
+            console.error(
+              `Error checking proximity for partner ${partner._id}`,
+              err
+            );
+          }
+        }
+      }
+
+      let commonPartners = [];
+      const commonPartnerIdsSet = new Set();
+
+      if (sellers.length > 1) {
+        const commonPartnerIds = sellerNearbyMap.reduce((acc, curr) =>
+          acc.filter((id) => curr.includes(id))
+        );
+
+        for (const partnerId of commonPartnerIds) {
+          const partner = partnerIdToPartner[partnerId];
+          const origin = `${partner.location.lat},${partner.location.long}`;
+          const destination = `${drop.lat},${drop.long}`;
+          const waypoints = sellers.map((s) => `${s.lat},${s.long}`).join("|");
+
+          const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&waypoints=${waypoints}&key=${googleMapsAPIKey}`;
+
+          try {
+            const routeRes = await axios.get(directionsUrl);
+            const legs = routeRes.data.routes[0]?.legs || [];
+
+            let totalDistance = 0;
+            let totalDuration = 0;
+
+            legs.forEach((leg) => {
+              totalDistance += leg.distance?.value || 0;
+              totalDuration += leg.duration?.value || 0;
+            });
+            // console.log(
+            //   "validPartners----------->>>>>>",
+            //   partner,
+            //   "validPartners----------->>>>>>"
+            // );
+            if (
+              totalDistance <= MAX_TOTAL_ROUTE_METERS &&
+              totalDuration <= MAX_TOTAL_ROUTE_DURATION_SECONDS
+            ) {
+              commonPartners.push({
+                partner,
+                sellers: sellers.map((s) => ({ sellerId: s.sellerId })),
+                totalRouteDistance: totalDistance,
+                totalRouteTime: totalDuration,
+                totalRouteDistanceInString: formatDistance(totalDistance),
+                totalRouteTimeInString: formatDuration(totalDuration),
+              });
+              commonPartnerIdsSet.add(partnerId);
+            }
+          } catch (err) {
+            console.error(
+              `Directions API error for common partner ${partnerId}:`,
+              err
+            );
+          }
+        }
+      }
+      // console.log("commonPartners", commonPartners, "commonPartners");
+      // return;
+      const sellerWisePartners = [];
+
+      for (let i = 0; i < sellers.length; i++) {
+        const seller = sellers[i];
+        const partnerIds = sellerNearbyMap[i];
+        const partnersWithRoutes = [];
+
+        for (const partnerId of partnerIds) {
+          if (commonPartnerIdsSet.has(partnerId)) continue;
+
+          const partner = partnerIdToPartner[partnerId];
+          const origin = `${partner.location.lat},${partner.location.long}`;
+          const destination = `${drop.lat},${drop.long}`;
+          const waypoint = `${seller.lat},${seller.long}`;
+
+          const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&waypoints=${waypoint}&key=${googleMapsAPIKey}`;
+
+          try {
+            const routeRes = await axios.get(directionsUrl);
+            const legs = routeRes.data.routes[0]?.legs || [];
+
+            let totalDistance = 0;
+            let totalDuration = 0;
+
+            legs.forEach((leg) => {
+              totalDistance += leg.distance?.value || 0;
+              totalDuration += leg.duration?.value || 0;
+            });
+
+            if (
+              totalDistance <= MAX_TOTAL_ROUTE_METERS &&
+              totalDuration <= MAX_TOTAL_ROUTE_DURATION_SECONDS
+            ) {
+              partnersWithRoutes.push({
+                partner,
+                totalRouteDistance: totalDistance,
+                totalRouteTime: totalDuration,
+                totalRouteDistanceInString: formatDistance(totalDistance),
+                totalRouteTimeInString: formatDuration(totalDuration),
+              });
+            }
+          } catch (err) {
+            console.error(
+              `Directions API error for seller ${seller.sellerId} with partner ${partnerId}:`,
+              err
+            );
+          }
+        }
+
+        if (partnersWithRoutes.length > 0) {
+          sellerWisePartners.push({
+            seller: { sellerId: seller.sellerId },
+            partners: partnersWithRoutes,
+          });
+        }
+      }
+
+      const uniquePartnerIds = new Set(sellerNearbyMap.flat());
+      const allPartners = [...uniquePartnerIds]
+        .filter((id) => !commonPartnerIdsSet.has(id))
+        .map((id) => partnerIdToPartner[id]);
+      // console.log("")
       return {
-        nearestPartner,
-        allPartners: partnersInZone,
-        // eta,
-        // distance: distanceText,
-        // directions: steps,
+        commonPartners,
+        sellerWisePartners,
+        allPartners,
       };
     } catch (error) {
-      console.error("Error finding nearest partner:", error);
+      console.error("Error finding nearby partners:", error);
       return Responder.sendFailure(res, "Something went wrong", 500);
     }
   };
+
+  // this.findZonesContainingDeliveryPartner = async function (res, req) {
+  //   try {
+  //     let sellerLat = req.body.lat;
+  //     let sellerLong = req.body.long;
+
+  //     if (!sellerLat || !sellerLong) {
+  //       return Responder.sendFailure(
+  //         res,
+  //         "Latitude and Longitude are required",
+  //         400
+  //       );
+  //     }
+
+  //     // Step 1: Find the Area ID where the seller's location falls
+  //     let allAreas = await AreaModel.find();
+  //     let matchedArea = allAreas.find((area) =>
+  //       this.isPointInPolygon(
+  //         [sellerLat, sellerLong],
+  //         area.polygoneLatelong.map((coord) => [coord.lat, coord.lng])
+  //       )
+  //     );
+
+  //     if (!matchedArea) {
+  //       return undefined;
+  //     }
+
+  //     let zoneId = matchedArea.zoneId;
+
+  //     // Step 2: Get all areas mapped to the same Zone ID
+  //     let mappedAreas = await AreaModel.find({ zoneId });
+
+  //     // Step 3: Get all partners in these mapped areas
+  //     let partnersInZone = [];
+  //     for (const area of mappedAreas) {
+  //       let areaPolygon = area.polygoneLatelong.map((coord) => [
+  //         coord.lat,
+  //         coord.lng,
+  //       ]);
+
+  //       let partners = await PartnerModel.find({
+  //         "location.lat": { $exists: true },
+  //         "location.long": { $exists: true },
+  //         workStatus: "waiting_for_order",
+  //         status: true,
+  //       });
+
+  //       partners.forEach((partner) => {
+  //         let partnerLat = partner.location.lat;
+  //         let partnerLong = partner.location.long;
+  //         if (this.isPointInPolygon([partnerLat, partnerLong], areaPolygon)) {
+  //           partnersInZone.push(partner);
+  //         }
+  //       });
+  //     }
+
+  //     if (partnersInZone.length === 0) {
+  //       return undefined;
+  //     }
+
+  //     // Step 4: Find the nearest delivery partner using Google Distance Matrix API
+  //     let destinations = partnersInZone
+  //       .map((partner) => `${partner.location.lat},${partner.location.long}`)
+  //       .join("|");
+
+  //     let googleMapsAPIKey = "AIzaSyBdgzn86CxjJDfA5PHD6Wq07a6Dlyh7F0s";
+
+  //     let distanceMatrixUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${sellerLat},${sellerLong}&destinations=${destinations}&key=${googleMapsAPIKey}`;
+
+  //     let distanceResponse = await axios.get(distanceMatrixUrl);
+
+  //     let distances = distanceResponse.data.rows[0].elements;
+
+  //     console.log(distances, "...................>distances");
+
+  //     let nearestPartner = null;
+  //     let minDistance = Infinity;
+
+  //     partnersInZone.forEach((partner, index) => {
+  //       let distance = distances[index].distance?.value || Infinity;
+  //       if (distance < minDistance) {
+  //         minDistance = distance;
+  //         console.log(distance, "----------->dis");
+  //         nearestPartner = { partner, ...distances[index] };
+  //       }
+  //     });
+
+  //     if (!nearestPartner) {
+  //       return Responder.sendFailure(res, "No nearby partner found", 404);
+  //     }
+
+  //     // // Step 5: Get directions and ETA using Google Directions API
+  //     // let directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${sellerLat},${sellerLong}&destination=${nearestPartner.location.lat},${nearestPartner.location.long}&key=${googleMapsAPIKey}`;
+
+  //     // let directionsResponse = await axios.get(directionsUrl);
+
+  //     // console.log(directionsResponse, "------------->direction response");
+  //     // let routeData = directionsResponse.data.routes[0];
+
+  //     // console.log(routeData, "routeData=>>>>>>>>>>>>>>>>>>>>>");
+  //     // let eta = routeData.legs[0].duration.text; // Estimated time of arrival
+  //     // let distanceText = routeData.legs[0].distance.text; // Distance in km/miles
+  //     // let steps = routeData.legs[0].steps.map((step) => step.html_instructions); // Step-by-step directions
+
+  //     // console.log(
+  //     //   eta,
+  //     //   distanceText,
+  //     //   steps,
+  //     //   "---------------------------------->all"
+  //     // );
+
+  //     return {
+  //       nearestPartner,
+  //       allPartners: partnersInZone,
+  //       // eta,
+  //       // distance: distanceText,
+  //       // directions: steps,
+  //     };
+  //   } catch (error) {
+  //     console.error("Error finding nearest partner:", error);
+  //     return Responder.sendFailure(res, "Something went wrong", 500);
+  //   }
+  // };
 
   this.createUserInKong = function (username, callback) {
     request.post(

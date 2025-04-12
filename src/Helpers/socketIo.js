@@ -114,31 +114,6 @@ const initializeSocket = (port, apiBaseUrl) => {
 
     socket.on("partnerLocationUpdate", async (data) => {
       try {
-        // console.log("data", data, "data");
-        // await OrderModel.updateOne(
-        //   { orderId: data.orderId },
-        //   {
-        //     $set: {
-        //       "deliveryPartners.tracking.currentLocation.lat":
-        //         data.location.lat,
-        //       "deliveryPartners.tracking.currentLocation.long":
-        //         data.location.lng,
-        //     },
-        //   }
-        // );
-        let order = await OrderModel.findOne({ orderId: data.orderId });
-        order.deliveryPartners.tracking.currentLocation.lat = data.location.lat;
-        order.markModified("deliveryPartners.tracking.currentLocation.lat");
-        order.deliveryPartners.tracking.currentLocation.long =
-          data.location.lng;
-        order.markModified("deliveryPartners.tracking.currentLocation.long");
-        await order.save();
-        let partner = await PartnerModel.findOne({ partnerId: data.partnerId });
-        partner.location.lat = data.location.lat;
-        partner.markModified("location.lat");
-        partner.location.long = data.location.lng;
-        partner.markModified("location.long");
-        await partner.save();
         // let a = await PartnerModel.updateOne(
         //   { partnerId: data.partnerId },
         //   {
@@ -148,7 +123,7 @@ const initializeSocket = (port, apiBaseUrl) => {
         //     },
         //   }
         // );
-        console.log(a, "------------->aaa");
+        console.log("------------->aaa");
       } catch (error) {}
       //***********type*************/
       // {
@@ -160,22 +135,109 @@ const initializeSocket = (port, apiBaseUrl) => {
 
       const { partnerId, orderId, location } = data;
 
-      console.log(`Location update from partner ${partnerId}:`, location);
+      console.log(data, "---------------->pa--data");
 
-      // Broadcast to relevant seller and user if they exist
-      const orderData = { partnerId, orderId, location };
+      let order = await OrderModel.findOne({ orderId: orderId });
+
+      // if (!order) {
+      //   const error = new Error(`Order with ID ${orderId} not found`);
+      //   error.status = 400;
+      //   throw error;
+      // }
+
+      // if (!order.deliveryPartners || !Array.isArray(order.deliveryPartners)) {
+      //   const error = new Error(
+      //     "Invalid order data: deliveryPartners missing or not an array"
+      //   );
+      //   error.status = 400;
+      //   throw error;
+      // }
+
+      if (order) {
+        const partnerIndex = order.deliveryPartners.findIndex(
+          (partner) => partner.partnerId === data.partnerId
+        );
+        if (partnerIndex === -1) {
+          socket.emit("registrationStatus", {
+            success: false,
+            message: "Delivery Partner not found",
+          });
+        }
+        console.log(
+          partnerIndex,
+          order.deliveryPartners[partnerIndex].tracking.currentLocation.lat,
+
+          "----------------------?"
+        );
+        order.deliveryPartners[partnerIndex].tracking.currentLocation.lat =
+          data.location.lat;
+        order.deliveryPartners[partnerIndex].tracking.currentLocation.long =
+          data.location.lng;
+        // Mark the modified fields
+        order.markModified(
+          `deliveryPartners.${partnerIndex}.tracking.currentLocation`
+        );
+        await order.save();
+        let partner = await PartnerModel.findOne({ partnerId: partnerId });
+
+        console.log("partner111", partner, "partner111");
+
+        partner.location.lat = data.location.lat;
+
+        partner.markModified("location.lat");
+
+        partner.location.long = data.location.lng;
+
+        partner.markModified("location.long");
+
+        await partner.save();
+
+        console.log(`Location update from partner ${partnerId}:`, location);
+        const orderData = { partnerId, orderId, location };
+
+        console.log(order.deliveryPartners, "99999999999999");
+        // const userOrderData = order.deliveryPartners.filter(
+        //   (dp) => dp.partnerId != partnerId
+        // );
+        // console.log(userOrderData, "-------------->userrdaaa");
+        sellers.forEach((socketId) =>
+          io.to(socketId).emit("partnerLocationUpdate", orderData)
+        );
+        users.forEach((socketId) =>
+          io.to(socketId).emit("partnerLocationUpdate", data)
+        );
+
+        // users.forEach((socketId) =>
+        //   io.to(socketId).emit("partnerLocationUpdate", {
+        //     orderId,
+        //     deliveryPartners: [
+        //       ...userOrderData.map((items) => {
+        //         console.log(
+        //           items,
+        //           "--------->uspppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+        //         );
+        //         return {
+        //           ...items.tracking.currentLocation,
+        //           partnerId: items.partnerId,
+        //         };
+        //       }),
+        //       { partnerId: partnerId, lat: location.lat, long: location.lng },
+        //     ],
+        //   })
+        // );
+      }
       sellers.forEach((socketId) =>
-        io.to(socketId).emit("partnerLocationUpdate", orderData)
+        io.to(socketId).emit("partnerLocationUpdate", data)
       );
       users.forEach((socketId) =>
-        io.to(socketId).emit("partnerLocationUpdate", orderData)
+        io.to(socketId).emit("partnerLocationUpdate", data)
       );
+      // Broadcast to relevant seller and user if they exist
     });
 
     // Hand
     // Register delivery partner
     socket.on("registerDeliveryPartner", async (partner) => {
-      console.log(partner, "--------------------?");
       try {
         deliveryPartners.set(partner.partnerId, socket.id);
         console.log(
@@ -226,7 +288,7 @@ const initializeSocket = (port, apiBaseUrl) => {
     });
   });
 
-  return { io, sellers, users, deliveryPartners }; // Return deliveryPartners too
+  return { io, sellers, users, deliveryPartners };
 };
 
 module.exports = { initializeSocket };

@@ -3,11 +3,11 @@ const AdminConnection = require("../Database/Connection").getAdminDB();
 // function Schema() {
 let partnerSchema = new AdminConnection.Schema(
   {
-    partnerId: { type: String, required: true, unique: true },
-    areaId: { type: String, required: true },
+    partnerId: { type: String, unique: true },
+    areaId: { type: String },
     name: {
       type: String,
-      required: true,
+      // required: true,
     },
     phone: {
       type: String,
@@ -21,10 +21,19 @@ let partnerSchema = new AdminConnection.Schema(
       landmark: { type: String },
     },
     status: {
-      type: String,
-      enum: ["active", "inactivce"],
-      default: "inactive",
+      type: Boolean,
+      default: false,
     },
+    waitingTime: {
+      type: Number,
+      default: 0,
+    },
+    shiftTimings: [
+      {
+        startTime: { type: Date, required: true },
+        endTime: { type: Date, required: true },
+      },
+    ],
     workStatus: {
       type: String,
       enum: [
@@ -54,6 +63,15 @@ let partnerSchema = new AdminConnection.Schema(
   },
   {
     timestamps: true,
+  },
+
+  {
+    orders: [
+      {
+        type: AdminConnection.Schema.Types.ObjectId,
+        ref: "orders",
+      },
+    ],
   }
 );
 
