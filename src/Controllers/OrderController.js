@@ -566,7 +566,9 @@ function Controller() {
           mapData = {};
 
           order.deliveryPartners.push(deliveryPartnerData);
-          const partnerSocketId = deliveryPartners.get(bestPartner.partnerId);
+          const partnerSocketId = deliveryPartners.get(
+            bestPartner.partner.partnerId
+          );
           const userSocketId = users.get(order.user.userId);
           const assignedSellerId = sellerId;
 

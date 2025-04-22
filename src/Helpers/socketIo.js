@@ -160,6 +160,18 @@ const initializeSocket = (port, apiBaseUrl) => {
 
       let order = await OrderModel.findOne({ orderId: orderId });
 
+      let partner = await PartnerModel.findOne({ partnerId: partnerId });
+
+      partner.location.lat = data.location.lat;
+
+      partner.markModified("location.lat");
+
+      partner.location.long = data.location.lng;
+
+      partner.markModified("location.long");
+
+      await partner.save();
+
       // if (!order) {
       //   const error = new Error(`Order with ID ${orderId} not found`);
       //   error.status = 400;
